@@ -1,6 +1,6 @@
 # audit-2026-09 — Index
 
-Phase: execute
+Phase: wrapup
 
 This branch is the run's status board. It never merges into `main`.
 
@@ -73,7 +73,7 @@ confirmation.
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
 | `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | **done** (local commit `7f686cc`) |
-| `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | in progress |
+| `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | **done** (local commit `d1b0799`) |
 | `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | **done** (local commit `9dba3e6`) |
 
 ## Merge order
@@ -136,6 +136,27 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`thumbnail-preview-consistency` (done, `d1b0799`) — behavior change worth
+  a second look**: PDF page rotation is now honored (not zeroed) in both
+  preview and thumbnail, for correctness/parity. If Ghostscript emits
+  `/Rotate 90` for landscape EPS input, such files will now display rotated
+  where they previously didn't — spec-correct, but visibly different for
+  that input class, and there's no committed fixture yet to confirm what gs
+  actually emits for a rotated source (ties to T26's fixture gap).
+- Same branch, small scope deviation, reasonable: added a `project.yml`
+  exclusion so the new shared `PDFPageGeometry.swift` (which imports PDFKit)
+  doesn't get linked into the unsandboxed `RenderService` target via
+  autolinking — verified with `otool -L` that only the two extensions
+  reference PDFKit, not the service. Isolated, trivially droppable if the
+  owner disagrees.
+- Same branch found a **pre-existing, unrelated build warning** while
+  testing: `CFBundleVersion extension/parent mismatch` — worth checking
+  against T23's version-stamping fix once merged, may already be resolved
+  by it.
+
+**Phase 3 complete: all 15 branches (14 planned + 1 owner-directed) are
+locally committed. Proceeding to Phase 4 (wrap-up).**
 
 - **`swiftlint-and-language-mode` (done, `9dba3e6`) — `SWIFT_STRICT_CONCURRENCY:
   targeted` is enabled but provably inert on this toolchain (Xcode 26.6)**:
