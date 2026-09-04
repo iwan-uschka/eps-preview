@@ -3,7 +3,25 @@ import Foundation
 /// Shared with RenderService (Sources/Shared is compiled into every target,
 /// including RenderService) so client and service cannot drift apart.
 enum RenderLimits {
+    /// Quick Look previews are meant for figures, not multi-hundred-MB print
+    /// jobs. Cap input size so a huge or hostile file can't tie up disk/memory
+    /// before Ghostscript even runs.
     static let maxInputBytes = 100 * 1024 * 1024
+
+    /// Nothing bounds what `pdfwrite` emits from a valid input, so cap the
+    /// rendered PDF too — well below the input limit, since it is read into
+    /// memory and handed across XPC.
+    static let maxOutputBytes = 64 * 1024 * 1024
+
+    /// Upper bound on how long a single render may run. `-dSAFER` restricts
+    /// Ghostscript's file/IO access but not CPU use, so a pathological EPS
+    /// (e.g. an infinite loop in its PostScript body) could otherwise hang
+    /// the service indefinitely.
+    static let renderTimeout: TimeInterval = 20
+
+    /// The client waits a little longer than the service's own budget, so the
+    /// service's specific message wins whenever it does answer.
+    static let clientDeadline: TimeInterval = renderTimeout + 5
 }
 
 /// Thin client used by both extensions to talk to the embedded
@@ -57,11 +75,31 @@ enum RenderClient {
         connection.remoteObjectInterface = NSXPCInterface(with: RenderProtocol.self)
 
         let didFinish = Atomic(false)
+        let deadlineBox = Atomic<DispatchWorkItem?>(nil)
         func finish(_ pdf: Data?, _ error: String?) {
             if didFinish.swap(true) { return }
+            deadlineBox.swap(nil)?.cancel()
             completion(pdf, interpolate, error)
             connection.invalidate()
         }
+
+        // Without these, a service that accepts the connection and then dies
+        // or never answers leaves `completion` uncalled forever — the Quick
+        // Look panel spins and the connection leaks.
+        connection.interruptionHandler = {
+            finish(nil, "The render service stopped unexpectedly.")
+        }
+        connection.invalidationHandler = {
+            finish(nil, "The render service is unavailable.")
+        }
+
+        let deadline = DispatchWorkItem {
+            finish(nil, "The render service did not respond within "
+                + "\(Int(RenderLimits.clientDeadline))s.")
+        }
+        deadlineBox.store(deadline)
+        DispatchQueue.global().asyncAfter(deadline: .now() + RenderLimits.clientDeadline,
+                                          execute: deadline)
 
         connection.resume()
 
@@ -118,5 +156,21 @@ final class Atomic<Value> {
         let old = value
         value = newValue
         return old
+    }
+    /// Sets a new value, discarding the previous one.
+    func store(_ newValue: Value) {
+        lock.lock(); defer { lock.unlock() }
+        value = newValue
+    }
+    /// Reads the current value without changing it.
+    func load() -> Value {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+    /// Reads and updates the value in one locked step, for the cases where
+    /// `swap` would be a check-then-act race.
+    func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
+        lock.lock(); defer { lock.unlock() }
+        return body(&value)
     }
 }

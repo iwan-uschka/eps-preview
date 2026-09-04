@@ -40,6 +40,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Host
+      - path: Sources/Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview

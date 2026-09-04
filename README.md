@@ -42,10 +42,13 @@ load-bearing: build via `bash scripts/build.sh`, not a bare `xcodebuild`, or
 previews will fail with "Render service connection failed".
 
 Previews are bounded on purpose: EPS files larger than **100 MB** are refused
-up front, and a single Ghostscript render is terminated after **20 s**
-(`-dSAFER` restricts file/network access but not CPU, so a pathological
-PostScript body could otherwise hang the helper). Both limits live in
-`Sources/RenderService/RenderService.swift`.
+up front, a single Ghostscript render is terminated after **20 s** (`-dSAFER`
+restricts file/network access but not CPU, so a pathological PostScript body
+could otherwise hang the helper), a rendered PDF larger than **64 MB** is
+rejected instead of being read into memory, and at most **3** renders run at
+once — a Finder folder full of EPS files gets queued, not fanned out into
+unbounded Ghostscript processes. The limits live in
+`RenderLimits` (`Sources/Shared/RenderClient.swift`).
 
 ## Install
 
@@ -113,7 +116,7 @@ New EPS files always get thumbnails immediately.
 | `Sources/QuickLook` | Quick Look preview extension |
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
-| `Sources/Shared` | XPC protocol + client shared by the extensions |
+| `Sources/Shared` | XPC protocol + client, limits, Ghostscript locator (compiled into every target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `project.yml` | XcodeGen project definition |
 
