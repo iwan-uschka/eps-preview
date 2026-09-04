@@ -54,45 +54,26 @@ Worktrees are left in place deliberately (not cleaned up) so nothing here
 is lost before you've reviewed it. Remove one after you're done with it:
 `git worktree remove /Users/iwanuschka/projekte/_github/eps-preview-worktrees/<branch-name>`.
 
-## Deferred work (not branches this run — candidates for forge issues)
+## Deferred work → filed as GitHub issues (2026-09-05)
 
-No GitHub issues were filed for these this run — filing an issue is a
-public, forge-visible write action this run's owner-directed protocol
-didn't cover (same reasoning as the no-push/no-MR rule), so it needs its
-own go-ahead. This list is the durable record until then.
+Issues were disabled on this fork; owner asked to enable them and file these
+now. All 12 filed against `iwan-uschka/eps-preview`:
 
-- **T14** — sandbox-exec/rlimit confinement on the Ghostscript child
-  process. Owner decision (2026-09-04): too large / high regression risk to
-  bundle into this run; defer to a dedicated follow-up after the
-  render-service branches land and prove stable. Candidate follow-up items
-  to fold in if/when this is picked up: `scripts/install.sh`'s gs check
-  still has no ownership/version vetting (widened by
-  `render-service-01-hardening`, see notes below).
-- Ghostscript + bundled-library CVE check (needs a live CVE-database
-  lookup this run couldn't perform; feed in the dependency-manifest
-  versions `release-build-integrity` now records).
-- Pruning the unused OCR/archive dylib closure bundled by Homebrew's `gs`
-  formula (tesseract, leptonica, libarchive, webp, giflib) — this app never
-  exercises them; needs a custom Ghostscript build.
-- Full third-party license manifest generation with per-formula license
-  *text* harvesting (beyond the narrow ship-LICENSE-in-DMG + hand-written
-  NOTICE.md manifest slice `docs-and-license-compliance` did this run).
-- Legal sign-off on NOTICE.md's AGPL aggregation wording (see HITL #5).
-- Notarization / Developer ID signing (needs a paid Apple Developer account).
-- End-to-end Quick Look/Finder GUI integration test (needs a live logged-in
-  GUI session; not automatable in CI).
-- Negative XPC peer-rejection test (needs a second, separately-signed
-  fixture app).
-- macOS 26 (Tahoe) CI coverage (no local-hooks equivalent needed, but
-  worth noting hosted runner images for the newest macOS typically lag).
-- TCC-protected-location invariant (service never resolves a path outside
-  `/tmp`, by design) — document-only via an `AGENTS.md`/code comment, not
-  testable.
-- Unit tests for `wantsInterpolation` and `BundleLayout` — deliberately not
-  written by `add-unit-test-infrastructure` since both were being rewritten
-  by other branches this run; quick follow-up once those merge.
-- `scripts/package-release.sh:17`'s pre-existing `SC2034 LSREGISTER`
-  shellcheck warning (see HITL #8).
+- [#4 — Sandbox-confine the Ghostscript child process (rlimits + sandbox-exec)](https://github.com/iwan-uschka/eps-preview/issues/4) — T14
+- [#5 — Check pinned Ghostscript + bundled libraries against known CVEs](https://github.com/iwan-uschka/eps-preview/issues/5)
+- [#6 — Prune unused OCR/archive libraries from the bundled Ghostscript closure](https://github.com/iwan-uschka/eps-preview/issues/6)
+- [#7 — Automate third-party license manifest generation for bundled Ghostscript libs](https://github.com/iwan-uschka/eps-preview/issues/7) — T11 (full form)
+- [#8 — Legal review of NOTICE.md's AGPL aggregation wording](https://github.com/iwan-uschka/eps-preview/issues/8) — see HITL #5
+- [#9 — Notarize the app / sign with a real Developer ID](https://github.com/iwan-uschka/eps-preview/issues/9)
+- [#10 — Add an end-to-end Quick Look/Finder manual test checklist](https://github.com/iwan-uschka/eps-preview/issues/10)
+- [#11 — Add a negative XPC peer-rejection test](https://github.com/iwan-uschka/eps-preview/issues/11)
+- [#12 — Track macOS 26 (Tahoe) CI/runner coverage](https://github.com/iwan-uschka/eps-preview/issues/12)
+- [#13 — Document the TCC path-avoidance invariant](https://github.com/iwan-uschka/eps-preview/issues/13)
+- [#14 — Add unit tests for wantsInterpolation and BundleLayout once their rewriting branches merge](https://github.com/iwan-uschka/eps-preview/issues/14)
+- [#15 — Fix pre-existing shellcheck SC2034 warning in package-release.sh](https://github.com/iwan-uschka/eps-preview/issues/15) — see HITL #8
+
+No triage label was applied — the repo has no `needs-triage`-equivalent
+convention (only GitHub's default label set exists).
 
 ## Branch table
 
@@ -317,7 +298,8 @@ are the one place order actually matters.
 - 2026-09-05 — Owner added a scope item outside the original audit: remove
   all Chinese text from the repo. New branch `translate-to-english` created
   and completed same day.
-- 2026-09-05 — Run complete. All 15 branches locally committed. No forge
-  issues filed this run (filing is itself a public write action, out of
-  scope for this run's local-only protocol) — see "Deferred work" above for
-  the durable record; owner can ask for issues to be filed separately.
+- 2026-09-05 — Run complete. All 15 branches locally committed.
+- 2026-09-05 — Owner asked to file the deferred items as GitHub issues.
+  Discovered Issues were disabled on this fork (`gh issue create` failed
+  outright); owner confirmed enabling them. Ran `gh repo edit --enable-issues`
+  then filed all 12 (see "Deferred work" above for links).
