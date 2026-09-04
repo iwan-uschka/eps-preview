@@ -59,12 +59,13 @@ confirmation.
 |---|---|---|---|
 | `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | **done** (local commit `b7aebd8`) |
 | `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` (local branch) | T7 | in progress |
-| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | blocked on 01 |
+| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` (local branch) | T20,T21,T30,T32,T33,T36 | in progress |
 | `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
 | `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | **done** (local commits `c84e6c9`,`de1a3b3`) |
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
 | `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
-| `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | in progress |
+| `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | **done** (local commit `56635ed`) |
+| `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | **done** (local commit `9be91ca`) |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
@@ -134,6 +135,28 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`docs-and-license-compliance` (done, `56635ed`) corrected the audit
+  report itself**: reproduced the actual bundled-dylib closure rather than
+  trusting AUDIT-REPORT.md's list, and found `fontconfig` (`libfontconfig.1.
+  dylib`) was missing from it entirely, plus one license annotation was
+  imprecise (`libidn` is GPL-2.0-or-later OR LGPL-3.0-or-later per Homebrew,
+  not plain LGPL-2.1). NOTICE.md now reflects 20 third-party projects (21
+  dylibs) with license/version/homepage sourced from `brew info --json=v2`,
+  not guessed. Verified end-to-end with a real DMG build + mount + inspect.
+- **Owner: read the aggregation-legal-wording paragraph in NOTICE.md
+  yourself** before pushing — the agent flagged it as its own good-faith
+  reading, explicitly not legal advice, and it's the one load-bearing
+  compliance sentence in the repo.
+- **Cleanup needed in the main checkout (not a branch issue)**: `docs-and-
+  license-compliance`'s verification run left `dist/EPSPreview-0.0.0-
+  audit.dmg` (~20MB, gitignored, harmless) behind — its own `rm` was
+  sandbox-denied. Delete manually when convenient.
+- **`docs-and-license-compliance` used `WebFetch`** (read-only, public GitHub
+  pages) to check whether this fork has published releases, for the T46
+  fix — technically outside the briefing's `gh`/`glab` ban's literal wording
+  but adjacent to it; nothing was mutated. Flagged by the agent itself,
+  noting here for visibility.
 
 - **`render-service-01-hardening` (done, `b7aebd8`) — real deviation from the
   T13 sketch, correctly reasoned**: "reject non-root-owned gs candidates" as
