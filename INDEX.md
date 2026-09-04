@@ -58,7 +58,7 @@ confirmation.
 | Branch | Base | Scope (finding IDs) | Status |
 |---|---|---|---|
 | `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | **done** (local commit `b7aebd8`) |
-| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` (local branch) | T7 | in progress |
+| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` (local branch) | T7 | **done** (local commit `89c48ff`) |
 | `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` (local branch) | T20,T21,T30,T32,T33,T36 | in progress |
 | `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
 | `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | **done** (local commits `c84e6c9`,`de1a3b3`) |
@@ -67,7 +67,8 @@ confirmation.
 | `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | **done** (local commit `56635ed`) |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | **done** (local commit `9be91ca`) |
-| `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | in progress |
+| `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | **done** (local commit `ba47ea8`) |
+| `audit-2026-09/translate-to-english` | `main` | owner-directed (2026-09-05) | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
@@ -135,6 +136,41 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **New owner-directed branch (2026-09-05): `translate-to-english`.** Owner
+  wants zero Chinese text left anywhere in the repo — README.md's `中文速览`
+  section deleted entirely (not translated), `scripts/package-release.sh`'s
+  Chinese `INSTALL.txt` heredoc translated, `Sources/Host/HostApp.swift`'s
+  Chinese UI strings translated. Based on plain `main`, so it only covers
+  the Chinese text that exists there today.
+- **Known gap this creates**: `render-service-02-host-gs-detection` (done,
+  `89c48ff`) added a *new* Chinese loading-state string ("正在检测
+  Ghostscript……") to `HostApp.swift` that didn't exist on `main` — the
+  `translate-to-english` branch won't see or fix it, since it's based on
+  `main`, not that chain. **Owner: translate that one string manually when
+  merging**, or ask for a tiny follow-up fix — not worth restructuring the
+  branch graph for one string.
+- **`render-service-02-host-gs-detection` (done, `89c48ff`) — real
+  unresolved concern for a future merge**: if `host-app-sandboxing`'s
+  entitlement change lands on the host app too, `GhostscriptLocator`'s
+  version-check step (`meetsMinimumVersion`, spawns `gs --version`) will
+  fail under sandbox for the Homebrew-path case, silently reintroducing T7's
+  false "not found" warning for source-build users even though the DMG path
+  stays correct (bundled gs is exempt from version vetting). Agent flagged
+  this clearly; not fixed by anyone yet — worth a look before merging both.
+- **Could not visually verify** — `render-service-02-host-gs-detection`'s
+  agent had no Screen Recording / Accessibility permission in its sandbox,
+  so the three UI states (searching/installed/missing) are unverified by
+  eye; verified instead via a standalone `GhostscriptLocator` harness
+  confirming the resolver itself works (found `/opt/homebrew/bin/gs` in
+  0.115s cold). Owner: worth a 10-second manual launch-and-look before
+  pushing this one.
+- **`local-git-hooks` (done, `ba47ea8`) found a pre-existing shellcheck
+  warning** that will block the *first* future edit to
+  `scripts/package-release.sh` once hooks are activated: `SC2034 LSREGISTER
+  appears unused` at line 17. Not fixed (out of this branch's scope, no
+  other branch covers it) — small follow-up recommended (`export
+  LSREGISTER` or delete if dead).
 
 - **`docs-and-license-compliance` (done, `56635ed`) corrected the audit
   report itself**: reproduced the actual bundled-dylib closure rather than
