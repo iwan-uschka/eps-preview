@@ -57,8 +57,8 @@ confirmation.
 
 | Branch | Base | Scope (finding IDs) | Status |
 |---|---|---|---|
-| `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | in progress |
-| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` | T7 | blocked on 01 |
+| `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | **done** (local commit `b7aebd8`) |
+| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` (local branch) | T7 | in progress |
 | `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | blocked on 01 |
 | `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
 | `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | **done** (local commits `c84e6c9`,`de1a3b3`) |
@@ -134,6 +134,35 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`render-service-01-hardening` (done, `b7aebd8`) — real deviation from the
+  T13 sketch, correctly reasoned**: "reject non-root-owned gs candidates" as
+  literally specified would reject Homebrew's own `gs` (owned by the console
+  user, not root on this machine), breaking the README's documented
+  build-from-source path entirely. Implemented the achievable subset instead
+  — reject group/world-writable binaries or parent dirs, and binaries owned
+  by a *third* account — with a code comment explaining why. **Residual gap,
+  documented, not fixed**: same-uid substitution of `gs` (an attacker with
+  the same user account replacing the binary) is still possible and isn't
+  defensible from inside this process. Version floor is gs ≥ 9.50 (a
+  judgement call — where `-dSAFER` became default — not a CVE-driven floor;
+  rejection is currently reported to the user as generic "not found", not
+  "found but rejected", which the future typed-error branch should improve).
+- **Widened, not created, by the same branch**: `scripts/install.sh`'s own gs
+  check (`command -v gs` fallback) now diverges further from the vetted
+  Swift resolver, which deliberately has no PATH fallback and now also
+  rejects on ownership/version — `install.sh` can report "Ghostscript found"
+  for a binary the service will refuse to use. Whoever eventually touches
+  `install.sh` again should reconcile this (not assigned to any branch this
+  run — note for the T14 follow-up issue or a future pass).
+- **Known residual limitations, documented in code by the agent, not
+  regressions**: no reap-safe force-kill in Foundation (tiny PID-reuse
+  window on the SIGKILL escalation path, pre-existing pattern, now narrower);
+  a genuinely unkillable gs process holds its concurrency slot for the
+  service's lifetime (client-side deadline means the *user* no longer hangs,
+  but the slot leaks); a hostile EPS flooding stdout before failing can push
+  its own real error past the 64KB retained diagnostic head, truncating it
+  (no security impact, just a worse error message).
 
 - **`repo-hygiene` (done, `9be91ca`) corrected a factual detail in
   AUDIT-REPORT.md's T45**: the report said `.claude/` was ignored via the
