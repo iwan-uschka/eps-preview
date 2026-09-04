@@ -60,11 +60,11 @@ confirmation.
 | `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | in progress |
 | `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` | T7 | blocked on 01 |
 | `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | blocked on 01 |
-| `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | in progress |
+| `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
 | `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | in progress |
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
 | `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
-| `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | pending |
+| `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
@@ -122,6 +122,26 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`xpc-trust-and-hardened-signing` (done, `10dfa60`) deviated from the
+  planned approach on T5 axis 1**, for a real API-availability reason, not a
+  shortcut: `kSecGuestAttributeAudit` needs the connection's raw audit
+  token, which `NSXPCConnection` does not expose publicly (no
+  `xpc_connection_get_audit_token` bridging, no public `auditToken`
+  property). Instead the agent used `NSXPCConnection.
+  setCodeSigningRequirement` (macOS 13+), which XPC re-validates per-message
+  against the live connection — closes the same PID-reuse gap without
+  private API. Verified with a differential test: an ad-hoc "evil" probe
+  binary was accepted by unmodified `origin/main` and rejected by this
+  branch. cdhash pinning (part of axis 2) was found structurally impossible
+  given inside-out ad-hoc signing (the extension's cdhash isn't known until
+  after the already-signed service exists) — used an identifier-based
+  `SecRequirementCreateWithString` instead. **Owner: no action needed, just
+  documented** — reasoning and differential-test methodology are in the
+  agent's full report if you want to verify before pushing.
+- **`xpc-trust-and-hardened-signing` installed `xcodegen` via Homebrew**
+  (was missing on this machine) to be able to run `build.sh` at all — a
+  machine-state change flagged by the agent, not a repo change.
 
 - **`host-app-sandboxing` (done, `ae0d5b5`) extended its own scope by one
   line**: sandboxing `Sources/Host/Host.entitlements` broke
