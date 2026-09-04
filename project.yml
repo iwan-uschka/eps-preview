@@ -22,7 +22,10 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
     PROVISIONING_PROFILE_SPECIFIER: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Load-bearing for the XPC peer check: without the hardened runtime,
+    # DYLD_INSERT_LIBRARIES gives an attacker a process that still passes
+    # every signature and identifier test the render service applies.
+    ENABLE_HARDENED_RUNTIME: YES
     DEAD_CODE_STRIPPING: YES
 
 targets:

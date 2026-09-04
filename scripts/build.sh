@@ -97,7 +97,10 @@ echo "  CFBundleVersion = $BUILD_VERSION"
 
 echo
 echo "── (4/5) Ad-hoc signing (inside-out) ──"
-sign() { codesign --force --sign - --timestamp=none "$@"; }
+# --options runtime is load-bearing, not cosmetic: the render service's peer
+# check is only meaningful if a validated peer binary can't be hijacked
+# in-process via DYLD_INSERT_LIBRARIES.
+sign() { codesign --force --sign - --timestamp=none --options runtime "$@"; }
 
 # 1. The unsandboxed render service copies (no entitlements → unsandboxed).
 sign "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"

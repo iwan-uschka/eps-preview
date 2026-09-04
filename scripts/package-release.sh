@@ -39,7 +39,7 @@ echo
 echo "════ 3/4  Re-seal the app (added Contents/Helpers) ════"
 # Adding Helpers/ invalidated the app's outer seal; re-sign the host app so
 # the bundled gs is covered. (Nested extensions/service stay as signed.)
-codesign --force --sign - --timestamp=none \
+codesign --force --sign - --timestamp=none --options runtime \
   --entitlements Sources/Host/Host.entitlements "$APP"
 codesign --verify --deep --strict "$APP" && echo "  ✓ signature valid"
 
