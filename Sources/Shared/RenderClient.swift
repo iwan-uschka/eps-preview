@@ -1,5 +1,11 @@
 import Foundation
 
+/// Shared with RenderService (Sources/Shared is compiled into every target,
+/// including RenderService) so client and service cannot drift apart.
+enum RenderLimits {
+    static let maxInputBytes = 100 * 1024 * 1024
+}
+
 /// Thin client used by both extensions to talk to the embedded
 /// RenderService over XPC. A fresh connection is opened per render — Quick
 /// Look requests are infrequent, and a per-request connection keeps the
@@ -16,6 +22,18 @@ enum RenderClient {
     static func render(fileURL: URL,
                        completion: @escaping (_ pdf: Data?, _ interpolate: Bool, _ error: String?) -> Void) {
         let scoped = fileURL.startAccessingSecurityScopedResource()
+
+        // Reject oversized inputs from the file's metadata, before reading any
+        // bytes — otherwise the cap in RenderService only fires after we've
+        // already paid the read + scan + XPC cost for the whole file.
+        if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > RenderLimits.maxInputBytes {
+            if scoped { fileURL.stopAccessingSecurityScopedResource() }
+            let limitMB = RenderLimits.maxInputBytes / (1024 * 1024)
+            completion(nil, false, "EPS file exceeds the \(limitMB) MB preview size limit.")
+            return
+        }
+
         let epsData: Data?
         do {
             epsData = try Data(contentsOf: fileURL, options: .mappedIfSafe)
@@ -88,8 +106,9 @@ enum RenderClient {
     }
 }
 
-/// Minimal thread-safe box used to make the completion handler fire once.
-private final class Atomic<Value> {
+/// Minimal thread-safe box. Not private: RenderService reuses it for its own
+/// one-shot render-watchdog flag instead of hand-rolling a second lock-box.
+final class Atomic<Value> {
     private var value: Value
     private let lock = NSLock()
     init(_ value: Value) { self.value = value }

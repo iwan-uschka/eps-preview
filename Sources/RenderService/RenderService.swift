@@ -30,8 +30,9 @@ final class RenderService: NSObject, RenderProtocol {
 
     /// Quick Look previews are meant for figures, not multi-hundred-MB print
     /// jobs. Cap input size so a huge or hostile file can't tie up disk/memory
-    /// before Ghostscript even runs.
-    private static let maxInputBytes = 100 * 1024 * 1024
+    /// before Ghostscript even runs. Shared with RenderClient's own
+    /// pre-read check so the two limits cannot drift apart.
+    private static let maxInputBytes = RenderLimits.maxInputBytes
 
     /// Upper bound on how long a single render may run. `-dSAFER` restricts
     /// Ghostscript's file/IO access but not CPU use, so a pathological EPS
@@ -91,11 +92,16 @@ final class RenderService: NSObject, RenderProtocol {
             return
         }
 
-        let timedOutFlag = TimedOutFlag()
+        let timedOut = Atomic(false)
         let watchdog = DispatchWorkItem {
-            if process.isRunning {
-                timedOutFlag.set()
-                process.terminate()
+            guard process.isRunning else { return }
+            timedOut.swap(true)
+            process.terminate()                       // SIGTERM: let gs clean up
+            // A child stuck in an uninterruptible wait ignores SIGTERM; without
+            // this escalation waitUntilExit() below never returns and the
+            // extension's completion handler is never called at all.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.renderTimeout, execute: watchdog)
@@ -105,7 +111,7 @@ final class RenderService: NSObject, RenderProtocol {
 
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
 
-        if timedOutFlag.isSet {
+        if timedOut.swap(true) {
             reply(nil, "Ghostscript timed out after \(Int(Self.renderTimeout))s and was terminated.")
             return
         }
@@ -159,19 +165,5 @@ final class RenderService: NSObject, RenderProtocol {
         var env = ProcessInfo.processInfo.environment
         env["GS_LIB"] = gsLib
         return Ghostscript(executablePath: binary.path, environment: env)
-    }
-}
-
-/// Minimal thread-safe latch used to record that the render watchdog fired.
-private final class TimedOutFlag {
-    private var value = false
-    private let lock = NSLock()
-    func set() {
-        lock.lock(); defer { lock.unlock() }
-        value = true
-    }
-    var isSet: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return value
     }
 }

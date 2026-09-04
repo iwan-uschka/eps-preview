@@ -41,6 +41,12 @@ Ghostscript. This makes the ad-hoc signing step in `scripts/build.sh`
 load-bearing: build via `bash scripts/build.sh`, not a bare `xcodebuild`, or
 previews will fail with "Render service connection failed".
 
+Previews are bounded on purpose: EPS files larger than **100 MB** are refused
+up front, and a single Ghostscript render is terminated after **20 s**
+(`-dSAFER` restricts file/network access but not CPU, so a pathological
+PostScript body could otherwise hang the helper). Both limits live in
+`Sources/RenderService/RenderService.swift`.
+
 ## Install
 
 ### Option A — Download (recommended, nothing to build)
