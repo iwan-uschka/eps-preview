@@ -6,7 +6,7 @@
 #
 # The .dmg is ad-hoc signed (no Apple Developer Program), so first launch
 # still needs the user to approve it once in System Settings → Privacy &
-# Security. See the bundled 安装说明 / INSTALL file.
+# Security. See the bundled INSTALL.txt file.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,29 +50,16 @@ mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/EPSPreview.app"
 ln -s /Applications "$STAGE/Applications"
 
-cat > "$STAGE/安装说明 INSTALL.txt" <<'EOF'
-EPS Preview — 安装步骤 / How to install
-=======================================
+cat > "$STAGE/INSTALL.txt" <<'EOF'
+EPS Preview — How to install
+============================
 
-中文
-----
-1. 把 EPSPreview.app 拖到旁边的「Applications」文件夹。
-2. 打开「访达 → 应用程序」，找到 EPSPreview，双击打开。
-3. 第一次会被系统拦截（因为没有花钱做 Apple 公证）。这时打开
-   「系统设置 → 隐私与安全性」，往下拉，点「仍要打开 / Open Anyway」，
-   再确认一次即可。以后就不会再提示。
-4. 打开一次 App 后，在访达里选中任意 .eps / .ps 文件，按【空格】预览，
-   文件图标也会显示缩略图。
-
-不需要安装 Homebrew 或 Ghostscript —— 都已打包在 App 内。
-
-English
--------
 1. Drag EPSPreview.app onto the "Applications" folder shown here.
-2. In Applications, double-click EPSPreview.
+2. Open Finder → Applications, find EPSPreview, and double-click it.
 3. macOS will block it the first time (the app is not Apple-notarized).
    Open System Settings → Privacy & Security, scroll down, click
-   "Open Anyway", and confirm. You only do this once.
+   "Open Anyway", and confirm once more. You only do this once — you will
+   not be asked again.
 4. After launching it once, select any .eps / .ps file in Finder and press
    Space to preview; Finder icons will show thumbnails too.
 

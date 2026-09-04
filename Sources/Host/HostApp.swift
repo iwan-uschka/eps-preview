@@ -26,12 +26,12 @@ struct ContentView: View {
                 .font(.title).bold()
 
             if ghostscriptInstalled {
-                Text("已就绪。在访达中选中任意 .eps / .ps 文件，按 **空格键** 即可预览，"
-                     + "图标也会显示真实缩略图。")
+                Text("Ready to go. Select any .eps / .ps file in Finder and press **Space** "
+                     + "to preview it — icons will show the real thumbnail too.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             } else {
-                Text("还差一步：未检测到 Ghostscript。请在终端运行：")
+                Text("One more step: Ghostscript wasn't found. Run this in Terminal:")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Text("brew install ghostscript")
@@ -41,7 +41,7 @@ struct ContentView: View {
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
             }
 
-            Text("可以关闭此窗口，预览功能已在后台生效。")
+            Text("You can close this window — previews already work in the background.")
                 .font(.footnote)
                 .foregroundStyle(.tertiary)
         }

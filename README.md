@@ -8,8 +8,6 @@ macOS Sequoia / Tahoe.
 Select an EPS file in Finder, press **Space**, and see the full figure.
 Finder icons show the real figure instead of a blank document.
 
-<!-- 中文速览见底部 -->
-
 ## How it works
 
 macOS 15 (Sequoia) and 26 (Tahoe) only register Quick Look extensions that
@@ -128,26 +126,3 @@ Build-from-source uses your own Homebrew Ghostscript (nothing AGPL is
 distributed). The downloadable **release** bundles a self-contained
 Ghostscript, which is **AGPL-3.0**; see [NOTICE.md](NOTICE.md) for details and
 source links.
-
----
-
-## 中文速览
-
-在新版 macOS 上恢复 `.eps` / `.ps` 文件的**空格预览**和**访达缩略图**功能
-（Apple 从 Ventura 起移除了 EPS 支持，Sequoia/Tahoe 又彻底停用了旧式 Quick
-Look 插件）。
-
-**原理**：macOS 15/26 只接受**沙盒化**的 Quick Look 扩展，但沙盒里又没法直接
-跑 Ghostscript。本项目用一个内置的**非沙盒 XPC 服务**来调用你系统里的
-Ghostscript 渲染 EPS→PDF，再由扩展用 PDFKit 显示，干净地绕开了沙盒限制。
-Ghostscript 不打包进来，用你 Homebrew 装的那份。
-
-**安装**：
-```bash
-brew install ghostscript xcodegen   # 若未安装
-git clone https://github.com/Zhangyanbo/eps-preview.git
-cd eps-preview
-bash scripts/build.sh && bash scripts/install.sh
-```
-装好后在访达里选中 `.eps` 文件按**空格**即可预览。旧文件图标若没刷新，运行
-`bash scripts/refresh-thumbnails.sh`。
