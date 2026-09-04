@@ -74,7 +74,7 @@ confirmation.
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
 | `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | **done** (local commit `7f686cc`) |
 | `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | in progress |
-| `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | in progress |
+| `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | **done** (local commit `9dba3e6`) |
 
 ## Merge order
 
@@ -136,6 +136,28 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`swiftlint-and-language-mode` (done, `9dba3e6`) — `SWIFT_STRICT_CONCURRENCY:
+  targeted` is enabled but provably inert on this toolchain (Xcode 26.6)**:
+  the agent built 4 times with different values and confirmed `targeted`
+  produces a byte-identical compiler invocation to leaving the key unset —
+  only `complete` actually changes anything. Added anyway since it's
+  zero-risk and matches the pre-authorized instruction, but it is a
+  statement of intent, not active protection — documented as such in the
+  `project.yml` comment. Useful data point for the eventual real migration:
+  `complete` mode currently surfaces exactly **one** real issue on `main`
+  (`PreviewViewController` crossing actor isolation) — but that measurement
+  predates the render-service branches' rewrites, so **re-measure after
+  those merge**, don't treat "one warning" as still accurate.
+- Same branch: 2 real swiftlint findings left unfixed on purpose (both in
+  `main.swift`/`RenderService.swift`, files actively being rewritten by the
+  render-service branches) — expected to resolve naturally once those land;
+  two-line follow-up if not.
+- **Cosmetic-only, all branches**: every commit's `Co-Authored-By` trailer
+  reads "Claude Sonnet 5" per this harness's fixed commit-message
+  convention, even though every branch agent in Phase 3 ran on Opus (as the
+  plan specified for judgment-heavy remediation work). Not worth fixing —
+  just don't read the trailer as which model actually did the work.
 
 - **`render-service-02-protocol-rework` (done, `c8cc7fa`) — real, honestly
   flagged residual risk**: FileHandle-over-XPC (T30) is proven only via an
