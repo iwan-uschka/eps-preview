@@ -57,13 +57,13 @@ confirmation.
 
 | Branch | Base | Scope (finding IDs) | Status |
 |---|---|---|---|
-| `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | pending |
-| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` | T7 | pending |
-| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | pending |
-| `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | pending |
-| `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | pending |
-| `audit-2026-09/host-app-sandboxing` | `main` | T44 | pending |
-| `audit-2026-09/release-build-integrity` | `main` | T1,T29 | pending |
+| `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | in progress |
+| `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` | T7 | blocked on 01 |
+| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | blocked on 01 |
+| `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | in progress |
+| `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | in progress |
+| `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
+| `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
 | `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | pending |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
@@ -122,6 +122,22 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`host-app-sandboxing` (done, `ae0d5b5`) extended its own scope by one
+  line**: sandboxing `Sources/Host/Host.entitlements` broke
+  `HostApp.swift`'s `ghostscriptInstalled` check — `isExecutableFile(atPath:)`
+  is denied under the sandbox for the four system gs paths (verified
+  empirically by the agent with a throwaway signed test app; no entitlement
+  fixes it). The agent switched that one check to `fileExists(atPath:)` and
+  flagged it explicitly as outside its assigned file list. **Owner: review
+  this specific change** (`Sources/Host/HostApp.swift`) before pushing —
+  agent's reasoning and test method are in its full report; not blindly
+  applied here, just recorded.
+- **`host-app-sandboxing` also noticed but did not fix**: the host status
+  window still doesn't check the *bundled* Ghostscript path (this is exactly
+  T7, owned by `render-service-02-host-gs-detection` once
+  `render-service-01-hardening` lands) — confirms T7 is still needed as
+  planned, not made redundant by this branch's fix.
 
 - **Unit tests for logic fixed by other branches**: `add-unit-test-infrastructure`
   only adds the test target/fixtures + tests for code not otherwise touched
