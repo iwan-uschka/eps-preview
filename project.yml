@@ -99,6 +99,11 @@ targets:
     sources:
       - path: Sources/RenderService
       - path: Sources/Shared
+        # The service renders, it never displays: keeping the PDFKit-only
+        # display geometry out of this target keeps the unsandboxed helper's
+        # linked frameworks unchanged.
+        excludes:
+          - PDFPageGeometry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.RenderService
