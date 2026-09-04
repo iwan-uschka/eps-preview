@@ -26,11 +26,9 @@ final class ThumbnailProvider: QLThumbnailProvider {
             let box = page.bounds(for: .mediaBox)
             guard box.width > 0, box.height > 0 else { fail("Empty page"); return }
 
-            // Fit into the requested maximum, preserving aspect, at device scale.
-            let maximum = request.maximumSize
-            let fit = min(maximum.width / box.width, maximum.height / box.height)
-            let pxW = max(Int((box.width * fit * request.scale).rounded()), 1)
-            let pxH = max(Int((box.height * fit * request.scale).rounded()), 1)
+            let (pxW, pxH) = thumbnailPixelSize(box: box,
+                                                maximumSize: request.maximumSize,
+                                                scale: request.scale)
 
             guard let context = CGContext(
                 data: nil, width: pxW, height: pxH,

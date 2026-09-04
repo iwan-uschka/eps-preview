@@ -108,7 +108,8 @@ targets:
 
   # ──────────────────────────────────────────────────────────────────────
   # Unit tests for the shared code (Ghostscript resolution cache and version
-  # floor, admission counter, render-outcome rules).
+  # floor, admission counter, render-outcome rules) plus fixture-backed
+  # coverage for BundleLayout and thumbnail geometry.
   #
   # It compiles Sources/Shared itself rather than depending on one of the app
   # targets: everything under test lives there, and a dependency on EPSPreview
@@ -121,6 +122,10 @@ targets:
     platform: macOS
     sources:
       - path: Tests
+        excludes:
+          - Fixtures
+      - path: Tests/Fixtures
+        type: folder
       - path: Sources/Shared
     settings:
       base:
