@@ -18,6 +18,13 @@ set -euo pipefail
 # upgrading, rather than picking up new versions unreviewed.
 EXPECTED_GHOSTSCRIPT_VERSION="10.07.1"
 
+# Homebrew resolves the ~20 dylibs gs links against live, so two builds of the
+# same pinned Ghostscript can ship different libtiff / freetype / openjpeg
+# revisions — the parsers untrusted EPS data actually reaches. This manifest
+# pins that closure by hash the way EXPECTED_GHOSTSCRIPT_VERSION pins gs.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEPENDENCY_MANIFEST="$ROOT/scripts/ghostscript-dependencies.txt"
+
 OUT="${1:?usage: bundle-ghostscript.sh <output-dir>}"
 
 command -v brew >/dev/null 2>&1 || { echo "error: Homebrew is required to source Ghostscript."; exit 1; }
@@ -85,37 +92,53 @@ while [ "$changed" -eq 1 ]; do
       if [ -n "$src" ] && [ -f "$src" ]; then
         cp -f "$src" "$OUT/lib/$base"; chmod u+w "$OUT/lib/$base"; changed=1
         echo "   + $base"
+      else
+        echo "error: $bin needs $dep, which resolves to nothing under $PREFIX."
+        echo "       Dropping it would ship a tree that dyld-errors on every machine"
+        echo "       without Homebrew. Install the missing formula and re-run."
+        exit 1
       fi
     done < <(list_deps "$bin")
   done
 done
 
 echo "→ rewriting install names to @rpath…"
+# install_name_tool warns on every single rewrite that it has invalidated the
+# code signature — everything is re-signed below, so that line is expected
+# noise; only surface output when a rewrite actually fails.
+rewrite_macho() {
+  local out
+  out="$(install_name_tool "$@" 2>&1)" || {
+    echo "error: install_name_tool $* failed:"
+    printf '%s\n' "$out" | sed 's/^/       /'
+    return 1
+  }
+}
 retarget() {
   local f="$1"
   while IFS= read -r dep; do
     [ -n "$dep" ] || continue
-    install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$f" 2>/dev/null || true
+    rewrite_macho -change "$dep" "@rpath/$(basename "$dep")" "$f"
   done < <(list_deps "$f")
 }
 for dy in "$OUT"/lib/*.dylib; do
   [ -f "$dy" ] || continue
-  install_name_tool -id "@rpath/$(basename "$dy")" "$dy" 2>/dev/null || true
+  rewrite_macho -id "@rpath/$(basename "$dy")" "$dy"
   retarget "$dy"
 done
 retarget "$OUT/converter"
-install_name_tool -add_rpath "@executable_path/lib" "$OUT/converter" 2>/dev/null || true
+rewrite_macho -add_rpath "@executable_path/lib" "$OUT/converter"
 
 echo "→ copying Ghostscript resources…"
 GSSHARE="$(dirname "$(dirname "$GS_BIN")")/share/ghostscript"
 [ -d "$GSSHARE/Resource" ] || GSSHARE="$("$GS_BIN" -h 2>/dev/null | grep -m1 'Resource/Init' | sed 's#/Resource/Init.*##' | tr -d ' :')"
 mkdir -p "$OUT/share"
-cp -R "$GSSHARE/Resource" "$OUT/share/" 2>/dev/null || true
-cp -R "$GSSHARE/lib"      "$OUT/share/" 2>/dev/null || true
+cp -R "$GSSHARE/Resource" "$OUT/share/"
+cp -R "$GSSHARE/lib"      "$OUT/share/"
 
 echo "→ ad-hoc signing…"
-for dy in "$OUT"/lib/*.dylib; do codesign --force --sign - "$dy" 2>/dev/null || true; done
-codesign --force --sign - "$OUT/converter" 2>/dev/null || true
+for dy in "$OUT"/lib/*.dylib; do codesign --force --sign - "$dy"; done
+codesign --force --sign - "$OUT/converter"
 
 echo "→ recording provenance…"
 {
@@ -127,5 +150,67 @@ echo "→ recording provenance…"
   done
   echo "bundled_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$OUT/GHOSTSCRIPT_PROVENANCE.txt"
+
+echo "→ checking the bundled library closure…"
+bundled_libs() { sed -n 's/^lib_sha256=//p' "$OUT/GHOSTSCRIPT_PROVENANCE.txt"; }
+if [ ! -f "$DEPENDENCY_MANIFEST" ]; then
+  bundled_libs > "$DEPENDENCY_MANIFEST"
+  echo "   recorded $(bundled_libs | wc -l | tr -d ' ') libraries in ${DEPENDENCY_MANIFEST#"$ROOT"/}"
+  echo "   — commit it so later builds are checked against this closure."
+elif ! MANIFEST_DIFF="$(diff -u "$DEPENDENCY_MANIFEST" <(bundled_libs))"; then
+  if [ "${ALLOW_DEPENDENCY_MANIFEST_MISMATCH:-0}" != "1" ]; then
+    echo "error: the bundled library closure no longer matches ${DEPENDENCY_MANIFEST#"$ROOT"/}."
+    printf '%s\n' "$MANIFEST_DIFF" | tail -n +3 | sed 's/^/       /'
+    echo "       Ghostscript itself is still $EXPECTED_GHOSTSCRIPT_VERSION, but these are the"
+    echo "       libraries it parses untrusted image/font data with, so their CVE exposure"
+    echo "       changed. Review their changelogs/CVEs, then either:"
+    echo "         - update ${DEPENDENCY_MANIFEST#"$ROOT"/} to the closure above (delete it and re-run to regenerate), or"
+    echo "         - pin Homebrew to the recorded revisions."
+    echo "       To bundle anyway (not recommended), re-run with ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1."
+    exit 1
+  fi
+  echo "warning: bundling a library closure that differs from ${DEPENDENCY_MANIFEST#"$ROOT"/}"
+fi
+
+echo "→ verifying the assembled tree…"
+for dir in "$OUT/share/Resource/Init" "$OUT/share/lib"; do
+  [ -d "$dir" ] || { echo "error: Ghostscript resource tree incomplete, missing $dir."; exit 1; }
+done
+
+# otool prints one header line per file argument, and $OUT can itself live
+# under $PREFIX — only the tab-indented dependency lines are load commands.
+LEFTOVER="$(otool -L "$OUT/converter" "$OUT"/lib/*.dylib | awk '/^\t/ {print $1}' | grep -F "$PREFIX" | sort -u || true)"
+if [ -n "$LEFTOVER" ]; then
+  echo "error: bundled binaries still load libraries from $PREFIX:"
+  printf '%s\n' "$LEFTOVER" | sed 's/^/       /'
+  echo "       They would dyld-error on any machine without Homebrew."
+  exit 1
+fi
+
+"$OUT/converter" --version >/dev/null
+
+PROBE="$(mktemp -d)"
+cat > "$PROBE/probe.eps" <<'EOF'
+%!PS-Adobe-3.0 EPSF-3.0
+%%BoundingBox: 0 0 8 8
+0.5 setgray 0 0 8 8 rectfill
+showpage
+EOF
+# Same GS_LIB layout and argument set RenderService.bundledGhostscript() uses,
+# so this exercises the tree exactly the way the shipped app will. A correct
+# tree renders this silently; gs falls back to its compiled-in Homebrew
+# resource path when the bundled one is unusable, and the only trace of that
+# on a machine that has Homebrew is the warning it prints — so any output here
+# is a failure, not just a non-zero exit.
+PROBE_LOG="$(GS_LIB="$OUT/share/Resource/Init:$OUT/share/lib:$OUT/share/Resource/Font" \
+  "$OUT/converter" -dNOPAUSE -dBATCH -dQUIET -dSAFER -dEPSCrop \
+  -dAutoRotatePages=/None -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 \
+  -sOutputFile="$PROBE/probe.pdf" "$PROBE/probe.eps" 2>&1)"
+if [ ! -s "$PROBE/probe.pdf" ] || [ -n "$PROBE_LOG" ]; then
+  echo "error: the bundled Ghostscript did not cleanly render the probe EPS."
+  printf '%s\n' "$PROBE_LOG" | sed 's/^/       /'
+  exit 1
+fi
+rm -rf "$PROBE"
 
 echo "✓ self-contained Ghostscript at $OUT ($(du -sh "$OUT" | cut -f1))"
