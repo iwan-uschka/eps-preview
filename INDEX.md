@@ -59,7 +59,7 @@ confirmation.
 |---|---|---|---|
 | `audit-2026-09/render-service-01-hardening` | `main` | T2,T3,T4,T13,T15,T16,T17,T35,T37 | **done** (local commit `b7aebd8`) |
 | `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` (local branch) | T7 | **done** (local commit `89c48ff`) |
-| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` (local branch) | T20,T21,T30,T32,T33,T36 | in progress |
+| `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` (local branch) | T20,T21,T30,T32,T33,T36 | **done** (local commit `c8cc7fa`) |
 | `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
 | `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | **done** (local commits `c84e6c9`,`de1a3b3`) |
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
@@ -136,6 +136,23 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`render-service-02-protocol-rework` (done, `c8cc7fa`) — real, honestly
+  flagged residual risk**: FileHandle-over-XPC (T30) is proven only via an
+  in-process `NSXPCListener.anonymous()` harness (64/64 checks passing,
+  including a genuine descriptor transfer and shared-offset hazard test) —
+  NOT proven under an actual sandboxed extension, which is the one case
+  that actually matters in production. **If Quick Look/Thumbnail regress
+  after this branch is installed, suspect this first** — the agent notes
+  it's cleanly revertible to plain `Data` transfer on its own. Owner: worth
+  a real on-device smoke test of this specific branch before merging.
+- Same branch, T20 (`wantsInterpolation` rewrite): deliberately scans the
+  *entire* buffer with no leading-window cap (measured 176ms worst case on
+  100MB) rather than risk a wrong answer on large figures — a documented
+  tradeoff, not an oversight, easy to add a cap later if it matters.
+- Same branch further confirms `README.md` is doubly stale on the "hands an
+  EPS path" claim (already wrong before this branch touched it, now more
+  wrong) — folds into the existing T28/README cleanup, not a new item.
 
 - **`add-unit-test-infrastructure` (done, `7f686cc`)** — 18/18 tests passing,
   confirmed the test target coexists cleanly with `scripts/build.sh`'s
