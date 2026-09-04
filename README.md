@@ -105,6 +105,20 @@ bash scripts/refresh-thumbnails.sh
 
 New EPS files always get thumbnails immediately.
 
+## Local checks (contributors)
+
+Git hooks live in `githooks/` and are opt-in per clone — activate them once:
+
+```bash
+git config core.hooksPath githooks
+```
+
+`pre-commit` runs `shellcheck` on staged `scripts/*.sh` (plus SwiftLint on
+staged Swift, once a `.swiftlint.yml` exists); `pre-push` runs
+`bash scripts/build.sh` so a broken build never reaches the remote. Needs
+`brew install shellcheck swiftlint`. Prefix a single command with
+`SKIP_HOOKS=1` to bypass them in an emergency.
+
 ## Project layout
 
 | Path | What |
