@@ -72,7 +72,7 @@ confirmation.
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
-| `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | in progress |
+| `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | **done** (local commit `7f686cc`) |
 | `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | in progress |
 | `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | in progress |
 
@@ -136,6 +136,17 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`add-unit-test-infrastructure` (done, `7f686cc`)** — 18/18 tests passing,
+  confirmed the test target coexists cleanly with `scripts/build.sh`'s
+  Release build (no test bundle leaks into the shipped app). Built a real
+  binary DOS-EPS fixture with an actual `gs`-generated TIFF preview rather
+  than skipping it. One correction to the task's own suggestion: fixtures
+  use `/Interpolate true` (PostScript image-dictionary form), not
+  `%%Interpolate: true` as originally suggested — the latter wouldn't match
+  `wantsInterpolation`'s actual documented byte-scan contract. Minor,
+  unfixed: README doesn't mention `Tests/` or how to run the suite (out of
+  this branch's declared scope).
 
 - **`refactor-shared-bundle-identifiers` (done, `523ee7f`) corrected
   AUDIT-REPORT.md**: the report's evidence for T27 claimed all four
