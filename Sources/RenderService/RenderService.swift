@@ -28,7 +28,24 @@ final class RenderService: NSObject, RenderProtocol {
         "/usr/bin/gs",
     ]
 
+    /// Quick Look previews are meant for figures, not multi-hundred-MB print
+    /// jobs. Cap input size so a huge or hostile file can't tie up disk/memory
+    /// before Ghostscript even runs.
+    private static let maxInputBytes = 100 * 1024 * 1024
+
+    /// Upper bound on how long a single render may run. `-dSAFER` restricts
+    /// Ghostscript's file/IO access but not CPU use, so a pathological EPS
+    /// (e.g. an infinite loop in its PostScript body) could otherwise hang
+    /// the service indefinitely.
+    private static let renderTimeout: TimeInterval = 20
+
     func renderEPSToPDF(epsData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
+        guard epsData.count <= Self.maxInputBytes else {
+            let limitMB = Self.maxInputBytes / (1024 * 1024)
+            reply(nil, "EPS file exceeds the \(limitMB) MB preview size limit.")
+            return
+        }
+
         guard let gs = Self.locateGhostscript() else {
             reply(nil, "Ghostscript not found. Install it with: brew install ghostscript")
             return
@@ -73,9 +90,25 @@ final class RenderService: NSObject, RenderProtocol {
             reply(nil, "Failed to launch Ghostscript: \(error.localizedDescription)")
             return
         }
+
+        let timedOutFlag = TimedOutFlag()
+        let watchdog = DispatchWorkItem {
+            if process.isRunning {
+                timedOutFlag.set()
+                process.terminate()
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.renderTimeout, execute: watchdog)
+
         process.waitUntilExit()
+        watchdog.cancel()
 
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+        if timedOutFlag.isSet {
+            reply(nil, "Ghostscript timed out after \(Int(Self.renderTimeout))s and was terminated.")
+            return
+        }
 
         guard process.terminationStatus == 0 else {
             let message = String(data: errorData, encoding: .utf8) ?? "unknown error"
@@ -128,5 +161,19 @@ final class RenderService: NSObject, RenderProtocol {
         var env = ProcessInfo.processInfo.environment
         env["GS_LIB"] = gsLib
         return Ghostscript(executablePath: binary.path, environment: env)
+    }
+}
+
+/// Minimal thread-safe latch used to record that the render watchdog fired.
+private final class TimedOutFlag {
+    private var value = false
+    private let lock = NSLock()
+    func set() {
+        lock.lock(); defer { lock.unlock() }
+        value = true
+    }
+    var isSet: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return value
     }
 }
