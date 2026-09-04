@@ -28,7 +28,25 @@ final class RenderService: NSObject, RenderProtocol {
         "/usr/bin/gs",
     ]
 
+    /// Quick Look previews are meant for figures, not multi-hundred-MB print
+    /// jobs. Cap input size so a huge or hostile file can't tie up disk/memory
+    /// before Ghostscript even runs. Shared with RenderClient's own
+    /// pre-read check so the two limits cannot drift apart.
+    private static let maxInputBytes = RenderLimits.maxInputBytes
+
+    /// Upper bound on how long a single render may run. `-dSAFER` restricts
+    /// Ghostscript's file/IO access but not CPU use, so a pathological EPS
+    /// (e.g. an infinite loop in its PostScript body) could otherwise hang
+    /// the service indefinitely.
+    private static let renderTimeout: TimeInterval = 20
+
     func renderEPSToPDF(epsData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
+        guard epsData.count <= Self.maxInputBytes else {
+            let limitMB = Self.maxInputBytes / (1024 * 1024)
+            reply(nil, "EPS file exceeds the \(limitMB) MB preview size limit.")
+            return
+        }
+
         guard let gs = Self.locateGhostscript() else {
             reply(nil, "Ghostscript not found. Install it with: brew install ghostscript")
             return
@@ -73,9 +91,30 @@ final class RenderService: NSObject, RenderProtocol {
             reply(nil, "Failed to launch Ghostscript: \(error.localizedDescription)")
             return
         }
+
+        let timedOut = Atomic(false)
+        let watchdog = DispatchWorkItem {
+            guard process.isRunning else { return }
+            timedOut.swap(true)
+            process.terminate()                       // SIGTERM: let gs clean up
+            // A child stuck in an uninterruptible wait ignores SIGTERM; without
+            // this escalation waitUntilExit() below never returns and the
+            // extension's completion handler is never called at all.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.renderTimeout, execute: watchdog)
+
         process.waitUntilExit()
+        watchdog.cancel()
 
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+        if timedOut.swap(true) {
+            reply(nil, "Ghostscript timed out after \(Int(Self.renderTimeout))s and was terminated.")
+            return
+        }
 
         guard process.terminationStatus == 0 else {
             let message = String(data: errorData, encoding: .utf8) ?? "unknown error"
