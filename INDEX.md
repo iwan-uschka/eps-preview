@@ -65,7 +65,8 @@ confirmation.
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
 | `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
 | `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | in progress |
-| `audit-2026-09/repo-hygiene` | `main` | T12,T45 | in progress |
+| `audit-2026-09/repo-hygiene` | `main` | T12,T45 | **done** (local commit `9be91ca`) |
+| `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
@@ -133,6 +134,17 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`repo-hygiene` (done, `9be91ca`) corrected a factual detail in
+  AUDIT-REPORT.md's T45**: the report said `.claude/` was ignored via the
+  user's *global* gitignore; the agent checked and found no such global rule
+  exists at all — `.claude/` was fully committable even on this machine
+  before this fix. Doesn't change the remediation, just the severity
+  framing (worse than stated, not better). Also confirmed: `AUDIT-REPORT.md`
+  itself remains a tracked file on this index branch regardless of the new
+  `.gitignore` entry (gitignore never untracks already-tracked paths) — not
+  a problem since this branch never merges to `main`, just noting it isn't
+  "fixed" by the repo-hygiene branch, it was never meant to be.
 
 - **`xpc-trust-and-hardened-signing` (done, `10dfa60`) deviated from the
   planned approach on T5 axis 1**, for a real API-availability reason, not a
