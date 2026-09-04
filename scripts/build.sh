@@ -46,7 +46,6 @@ embed_service() {
 }
 embed_service "$APP/Contents/PlugIns/EPSQuickLook.appex"
 embed_service "$APP/Contents/PlugIns/EPSThumbnail.appex"
-embed_service "$APP"
 
 echo
 echo "── (3.5/5) Pinning NSExtension blocks in built Info.plists ──"
@@ -86,7 +85,6 @@ for plist in \
   "$APP/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/Info.plist" \
-  "$APP/Contents/XPCServices/RenderService.xpc/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc/Contents/Info.plist"; do
   [ -f "$plist" ] || continue
@@ -102,8 +100,7 @@ sign() { codesign --force --sign - --timestamp=none "$@"; }
 # 1. The unsandboxed render service copies (no entitlements → unsandboxed).
 sign "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
 sign "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
-sign "$APP/Contents/XPCServices/RenderService.xpc"
-echo "  signed 3× RenderService.xpc (unsandboxed)"
+echo "  signed 2× RenderService.xpc (unsandboxed)"
 
 # 2. The sandboxed extensions, each with its entitlements.
 sign --entitlements Sources/QuickLook/QuickLook.entitlements \
