@@ -72,7 +72,7 @@ confirmation.
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
-| `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | pending |
+| `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | in progress |
 | `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | pending |
 | `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | pending |
 
