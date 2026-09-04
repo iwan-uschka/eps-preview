@@ -65,16 +65,16 @@ confirmation.
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
 | `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
 | `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | **done** (local commit `56635ed`) |
-| `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | in progress |
+| `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | **done** (local commit `523ee7f`) |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | **done** (local commit `9be91ca`) |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | **done** (local commit `ba47ea8`) |
-| `audit-2026-09/translate-to-english` | `main` | owner-directed (2026-09-05) | in progress |
+| `audit-2026-09/translate-to-english` | `main` | owner-directed (2026-09-05) | **done** (local commit `f868ad8`) |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
 | `audit-2026-09/add-unit-test-infrastructure` | `main` | T6,T26,T37 (thumbnailPixelSize) | in progress |
-| `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | pending |
-| `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | pending |
+| `audit-2026-09/thumbnail-preview-consistency` | `main` | T22,T31,T34 | in progress |
+| `audit-2026-09/swiftlint-and-language-mode` | `main` | T38 | in progress |
 
 ## Merge order
 
@@ -136,6 +136,31 @@ When the owner later pushes/MRs manually, push `01` first.
   same file, same theme).
 
 ## HITL / follow-up items
+
+- **`refactor-shared-bundle-identifiers` (done, `523ee7f`) corrected
+  AUDIT-REPORT.md**: the report's evidence for T27 claimed all four
+  `Info.plist`s repeat the bundle-ID literal — false against current `main`,
+  they already use `$(PRODUCT_BUNDLE_IDENTIFIER)`. Only 3 Swift call sites
+  had real duplication; fixed via a new `Sources/Shared/
+  BundleIdentifiers.swift`. Verified with a real signed XPC round-trip probe
+  (not just compile-check) that the render service still resolves correctly.
+- **Owner action needed**: this branch adds `scripts/check-
+  bundle-identifiers.sh` (a standalone consistency check) but deliberately
+  does NOT wire it into `scripts/build.sh` — three other branches
+  (`host-app-sandboxing`, `xpc-trust-and-hardened-signing`,
+  `build-and-maintenance-scripts`) already edit that file heavily. **Add
+  one line, `bash scripts/check-bundle-identifiers.sh`, near the end of the
+  merged `build.sh`** (after signing, so it can also check the built
+  bundles) once all `build.sh`-touching branches are merged.
+- **`translate-to-english` (done, `f868ad8`) — two small cleanup items**:
+  (1) another leftover gitignored DMG at `dist/EPSPreview-0.0.0-i18n.dmg`
+  (~20MB) in that worktree, sandbox-denied `rm` again, delete manually; (2)
+  suggests translating `render-service-02-host-gs-detection`'s new loading
+  string to `"Checking for Ghostscript…"` (see the gap noted above) rather
+  than a literal translation, and separately flagged a **pre-existing**
+  SwiftUI markdown-rendering bug in `HostApp.swift` (string concatenation
+  defeats `Text` markdown parsing, so `**Space**` shows literal asterisks)
+  that it correctly left alone as outside "translate the strings" scope.
 
 - **New owner-directed branch (2026-09-05): `translate-to-english`.** Owner
   wants zero Chinese text left anywhere in the repo — README.md's `中文速览`
