@@ -61,10 +61,11 @@ confirmation.
 | `audit-2026-09/render-service-02-host-gs-detection` | `render-service-01-hardening` | T7 | blocked on 01 |
 | `audit-2026-09/render-service-02-protocol-rework` | `render-service-01-hardening` | T20,T21,T30,T32,T33,T36 | blocked on 01 |
 | `audit-2026-09/xpc-trust-and-hardened-signing` | `main` | T5,T18 | **done** (local commit `10dfa60`) |
-| `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | in progress |
+| `audit-2026-09/build-and-maintenance-scripts` | `main` | T8,T9,T23,T24,T39,T40,T41,T42 | **done** (local commits `c84e6c9`,`de1a3b3`) |
 | `audit-2026-09/host-app-sandboxing` | `main` | T44 | **done** (local commit `ae0d5b5`) |
 | `audit-2026-09/release-build-integrity` | `main` | T1,T29 | in progress |
 | `audit-2026-09/docs-and-license-compliance` | `main` | T10,T11,T28,T46 | in progress |
+| `audit-2026-09/repo-hygiene` | `main` | T12,T45 | in progress |
 | `audit-2026-09/repo-hygiene` | `main` | T12,T45 | pending |
 | `audit-2026-09/local-git-hooks` | `main` | owner-directed (replaces CI) | pending |
 | `audit-2026-09/refactor-shared-bundle-identifiers` | `main` | T27 | pending |
@@ -108,11 +109,21 @@ When the owner later pushes/MRs manually, push `01` first.
   target dependency). All are small, additive XcodeGen key changes in
   different sections — expect trivial conflicts on manual merge, resolve by
   reapplying the small diff.
-- `scripts/build.sh` — touched by `xpc-trust-and-hardened-signing` (adds
-  `-o runtime` to `sign()` calls), `build-and-maintenance-scripts`
-  (entitlement post-verify, NSExtension consistency check, misc line fixes),
-  `host-app-sandboxing` (removes the host's `embed_service` call). Different
-  functions/lines in the same file — sequential application, low risk.
+- `scripts/build.sh` — **touched by three branches, needs manual reconciliation
+  at merge time (raised from "low risk" after all three landed):**
+  `xpc-trust-and-hardened-signing` (`10dfa60`, adds `-o runtime` to `sign()`
+  calls), `build-and-maintenance-scripts` (`c84e6c9`, entitlement post-verify
+  + NSExtension consistency check + **renumbered nearly every step header
+  line to a clean `(N/7)` scheme** — this touches much more of the file than
+  originally estimated), `host-app-sandboxing` (`ae0d5b5`, removes the host's
+  `embed_service` call and its `sign` step). **Concrete dependency, not just
+  textual overlap:** `build-and-maintenance-scripts` added an
+  `assert_sandbox_state absent "$APP/Contents/XPCServices/RenderService.xpc"`
+  check for the host's own copy of the service — but `host-app-sandboxing`
+  deletes that exact copy. Whichever of the two is applied second must drop
+  that one assertion line, or the merged `build.sh` will fail on a path that
+  no longer exists. Owner: resolve this explicitly when merging, don't apply
+  both diffs blindly.
 - `Sources/RenderService/RenderService.swift` — owned primarily by
   `render-service-01-hardening` (the big rewrite); `render-service-02-*`
   branches are chained on top specifically to avoid a parallel conflicting
