@@ -1,4 +1,5 @@
 import AppKit
+import os
 import PDFKit
 import QuickLookThumbnailing
 
@@ -7,24 +8,38 @@ import QuickLookThumbnailing
 /// back to Quick Look as a file.
 final class ThumbnailProvider: QLThumbnailProvider {
 
+    private static let log = Logger(subsystem: "com.zhangyanbo.EPSPreview",
+                                    category: "thumbnail")
+
     override func provideThumbnail(for request: QLFileThumbnailRequest,
                                    _ handler: @escaping (QLThumbnailReply?, Error?) -> Void) {
-        RenderClient.render(fileURL: request.fileURL) { data, interpolate, errorMessage in
-            func fail(_ message: String) {
-                handler(nil, NSError(domain: "com.zhangyanbo.EPSPreview", code: 1,
-                                     userInfo: [NSLocalizedDescriptionKey: message]))
+        RenderClient.render(fileURL: request.fileURL) { result in
+            func fail(_ failure: RenderFailure, _ reason: String) {
+                Self.log.error("Thumbnail failed: \(reason, privacy: .public)")
+                handler(nil, failure.nsError)
             }
 
-            guard let data,
-                  let document = PDFDocument(data: data),
+            let output: RenderOutput
+            switch result {
+            case .success(let value):
+                output = value
+            case .failure(let failure):
+                handler(nil, failure.nsError)
+                return
+            }
+
+            guard let document = PDFDocument(data: output.pdf),
                   let page = document.page(at: 0),
                   let cgPage = page.pageRef else {
-                fail(errorMessage ?? "Thumbnail render failed")
+                fail(.malformedInput, "rendered PDF has no usable first page")
                 return
             }
 
             let box = page.bounds(for: .mediaBox)
-            guard box.width > 0, box.height > 0 else { fail("Empty page"); return }
+            guard box.width > 0, box.height > 0 else {
+                fail(.malformedInput, "first page has an empty media box")
+                return
+            }
 
             // Fit into the requested maximum, preserving aspect, at device scale.
             let maximum = request.maximumSize
@@ -37,26 +52,29 @@ final class ThumbnailProvider: QLThumbnailProvider {
                 bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                fail("Could not create bitmap context"); return
+                fail(.internalError, "could not create a \(pxW)x\(pxH) bitmap context")
+                return
             }
 
             // White page background (documents render on white).
             context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
             context.fill(CGRect(x: 0, y: 0, width: pxW, height: pxH))
 
-            // Honor the source's interpolation intent (see RenderClient).
-            context.interpolationQuality = interpolate ? .high : .none
+            // Honor the source's interpolation intent (see RenderOutput).
+            context.interpolationQuality = output.wantsInterpolation ? .high : .none
 
             context.scaleBy(x: CGFloat(pxW) / box.width, y: CGFloat(pxH) / box.height)
             context.translateBy(x: -box.origin.x, y: -box.origin.y)
             context.drawPDFPage(cgPage)
 
             guard let cgImage = context.makeImage() else {
-                fail("Could not rasterize page"); return
+                fail(.internalError, "could not rasterize the first page")
+                return
             }
             let bitmap = NSBitmapImageRep(cgImage: cgImage)
             guard let png = bitmap.representation(using: .png, properties: [:]) else {
-                fail("Could not encode thumbnail"); return
+                fail(.internalError, "could not PNG-encode the thumbnail")
+                return
             }
 
             let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -64,7 +82,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
             do {
                 try png.write(to: outURL)
             } catch {
-                fail("Could not write thumbnail: \(error.localizedDescription)")
+                fail(.internalError, "could not write the thumbnail: \(error.localizedDescription)")
                 return
             }
 

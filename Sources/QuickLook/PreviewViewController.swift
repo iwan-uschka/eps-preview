@@ -54,28 +54,43 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     func preparePreviewOfFile(at url: URL,
                               completionHandler handler: @escaping (Error?) -> Void) {
-        RenderClient.render(fileURL: url) { [weak self] data, interpolate, errorMessage in
+        RenderClient.render(fileURL: url) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if let data, let document = PDFDocument(data: data) {
+                // `handler(nil)` either way: reporting an error here replaces
+                // the panel with the system's generic "cannot preview" sheet,
+                // which says less than the label below does.
+                switch result {
+                case .success(let output):
+                    guard let document = PDFDocument(data: output.pdf) else {
+                        self.show(.malformedInput)
+                        handler(nil)
+                        return
+                    }
                     for i in 0..<document.pageCount { document.page(at: i)?.rotation = 0 }
                     // Honor the source's interpolation intent: nearest-neighbour
                     // by default (keeps pixel figures crisp), smoothing only when
                     // the EPS explicitly asked for it.
-                    self.pdfView.interpolationQuality = interpolate ? .high : .none
+                    self.pdfView.interpolationQuality = output.wantsInterpolation ? .high : .none
                     self.pdfView.document = document
                     self.pdfView.isHidden = false
                     self.errorLabel.isHidden = true
                     handler(nil)
-                } else {
-                    // Surface the error in-panel AND report it, so the user
-                    // sees why (e.g. Ghostscript missing) rather than a blank.
-                    self.pdfView.isHidden = true
-                    self.errorLabel.stringValue = errorMessage ?? "Could not render this EPS file."
-                    self.errorLabel.isHidden = false
+                case .failure(let failure):
+                    self.show(failure)
                     handler(nil)
                 }
             }
         }
+    }
+
+    /// Only `RenderFailure`'s own text is shown. Ghostscript's diagnostics
+    /// are derived from the previewed file, and this panel is drawn by the
+    /// system — text an EPS author chose has no business appearing there as
+    /// if macOS had written it.
+    private func show(_ failure: RenderFailure) {
+        pdfView.isHidden = true
+        errorLabel.stringValue = failure.message
+        errorLabel.isHidden = false
     }
 }

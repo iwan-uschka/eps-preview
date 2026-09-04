@@ -1,15 +1,20 @@
 import Foundation
+import os
 
 /// Does the actual EPS → PDF conversion by shelling out to Ghostscript.
 ///
-/// Runs inside the *unsandboxed* XPC service. It receives the EPS *bytes*
-/// (not a path) from the extension and writes them to its own temp file —
-/// this keeps it from ever touching the user's original file location (which
-/// it has no TCC grant for), while still giving Ghostscript a real, seekable
-/// file (needed for binary DOS-EPS files that carry a preview header).
+/// Runs inside the *unsandboxed* XPC service. It receives an open descriptor
+/// for the EPS (not a path) from the extension and copies it into its own
+/// temp file — this keeps it from ever resolving the user's original file
+/// location (which it has no TCC grant for), while still giving Ghostscript a
+/// real, seekable file (needed for binary DOS-EPS files that carry a preview
+/// header).
 ///
 /// Where Ghostscript comes from is `GhostscriptLocator`'s job.
 final class RenderService: NSObject, RenderProtocol {
+
+    private static let log = Logger(subsystem: "com.zhangyanbo.EPSPreview.RenderService",
+                                    category: "render")
 
     /// Finder asks for a whole folder of thumbnails at once, and every render
     /// is a separate unsandboxed Ghostscript process with its own time
@@ -33,23 +38,39 @@ final class RenderService: NSObject, RenderProtocol {
         attributes: .concurrent)
 
     /// Ghostscript's stderr is drained continuously, but only its head is
-    /// retained: enough for the message we report back, bounded so a chatty
-    /// file cannot grow the service's memory. How much of that head reaches
-    /// the reply is `RenderOutcome`'s business.
+    /// retained: enough for the diagnostic we log, bounded so a chatty file
+    /// cannot grow the service's memory. None of it crosses XPC — the reply
+    /// carries a `RenderFailure` code and nothing the file authored; how much
+    /// of that head reaches the log is `RenderOutcome`'s business.
     private static let maxRetainedErrorBytes = 64 * 1024
 
     /// Grace period between SIGTERM and SIGKILL for a render that overran.
     private static let terminationGracePeriod: TimeInterval = 2
 
-    func renderEPSToPDF(epsData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
-        guard epsData.count <= RenderLimits.maxInputBytes else {
-            let limitMB = RenderLimits.maxInputBytes / (1024 * 1024)
-            reply(nil, "EPS file exceeds the \(limitMB) MB preview size limit.")
+    /// Chunk size for copying the caller's descriptor into our staging file,
+    /// so a 100 MB input never becomes a 100 MB allocation here either.
+    private static let stagingChunkBytes = 1 << 20
+
+    func renderEPSToPDF(input: FileHandle, withReply reply: @escaping (Data?, NSNumber?) -> Void) {
+        func refuse(_ failure: RenderFailure) {
+            try? input.close()
+            reply(nil, failure.xpcCode)
+        }
+
+        // The size is taken from the descriptor rather than from a path or a
+        // number the caller passed alongside it: `fstat` cannot disagree with
+        // what we are actually about to read.
+        guard let size = Self.regularFileSize(of: input), size > 0 else {
+            refuse(.inputUnreadable)
+            return
+        }
+        guard size <= RenderLimits.maxInputBytes else {
+            refuse(.inputTooLarge)
             return
         }
 
         guard Self.admission.reserve() else {
-            reply(nil, "Too many previews at once. Try again in a moment.")
+            refuse(.busy)
             return
         }
 
@@ -58,22 +79,64 @@ final class RenderService: NSObject, RenderProtocol {
         // has to stay able to accept (and refuse) further requests meanwhile.
         Self.renderQueue.async {
             Self.renderSlots.wait()
-            self.render(epsData: epsData) { pdf, error in
+            self.render(input: input) { pdf, failure in
                 Self.renderSlots.signal()
                 Self.admission.release()
-                reply(pdf, error)
+                reply(pdf, failure?.xpcCode)
             }
         }
     }
 
+    /// `nil` for anything that is not a regular file: a pipe or socket
+    /// descriptor has no size to check against the input limit and is not
+    /// seekable, which is precisely what a binary DOS-EPS preview header
+    /// needs it to be.
+    private static func regularFileSize(of handle: FileHandle) -> Int? {
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0,
+              info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            return nil
+        }
+        return Int(info.st_size)
+    }
+
     // MARK: - Running Ghostscript
+
+    /// Copies the caller's descriptor into our own temp file, in bounded
+    /// chunks. Reading starts at offset 0 explicitly: NSXPC handed us a
+    /// duplicate of the extension's descriptor, so the two share a file
+    /// offset and neither side may assume where the other left it.
+    ///
+    /// The copy is capped as well as the `fstat` that precedes it, because a
+    /// file on a volume someone else controls can grow between the two.
+    private static func stage(_ input: FileHandle, atPath path: String) throws {
+        guard FileManager.default.createFile(atPath: path, contents: nil,
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let output = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        defer { try? output.close() }
+        try input.seek(toOffset: 0)
+        var copied = 0
+        while let chunk = try input.read(upToCount: stagingChunkBytes), !chunk.isEmpty {
+            copied += chunk.count
+            guard copied <= RenderLimits.maxInputBytes else {
+                throw RenderFailure.inputTooLarge
+            }
+            try output.write(contentsOf: chunk)
+        }
+    }
 
     /// Launches Ghostscript and returns immediately; `completion` runs once,
     /// on a background queue, when the child has exited *and* its diagnostics
     /// have been read to EOF.
-    private func render(epsData: Data, completion: @escaping (Data?, String?) -> Void) {
+    private func render(input: FileHandle, completion: @escaping (Data?, RenderFailure?) -> Void) {
+        // The descriptor is needed only to stage the bytes; everything past
+        // that runs against our own copy, so it can go as soon as we return.
+        defer { try? input.close() }
+
         guard let gs = GhostscriptLocator.locate() else {
-            completion(nil, "Ghostscript not found. Install it with: brew install ghostscript")
+            completion(nil, .ghostscriptNotFound)
             return
         }
 
@@ -83,18 +146,19 @@ final class RenderService: NSObject, RenderProtocol {
 
         let isFinished = Atomic(false)
         let watchdogBox = Atomic<DispatchWorkItem?>(nil)
-        func finish(_ pdf: Data?, _ error: String?) {
+        func finish(_ pdf: Data?, _ failure: RenderFailure?) {
             if isFinished.swap(true) { return }
             watchdogBox.swap(nil)?.cancel()
             try? FileManager.default.removeItem(atPath: inputPath)
             try? FileManager.default.removeItem(atPath: outputPath)
-            completion(pdf, error)
+            completion(pdf, failure)
         }
 
         do {
-            try epsData.write(to: URL(fileURLWithPath: inputPath))
+            try Self.stage(input, atPath: inputPath)
         } catch {
-            finish(nil, "Could not stage EPS for rendering: \(error.localizedDescription)")
+            Self.log.error("Could not stage EPS for rendering: \(error.localizedDescription, privacy: .public)")
+            finish(nil, error as? RenderFailure ?? .internalError)
             return
         }
 
@@ -154,7 +218,7 @@ final class RenderService: NSObject, RenderProtocol {
             let result = RenderOutcome.result(for: termination,
                                               errorOutput: errorOutput.load(),
                                               outputPath: outputPath)
-            finish(result.pdf, result.error)
+            finish(result.pdf, result.failure)
         }
 
         process.terminationHandler = { settle($0) }
@@ -162,7 +226,8 @@ final class RenderService: NSObject, RenderProtocol {
         do {
             try process.run()
         } catch {
-            finish(nil, "Failed to launch Ghostscript: \(error.localizedDescription)")
+            Self.log.error("Failed to launch Ghostscript: \(error.localizedDescription, privacy: .public)")
+            finish(nil, .internalError)
             return
         }
 
