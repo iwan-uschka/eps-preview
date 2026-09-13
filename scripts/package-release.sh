@@ -14,7 +14,6 @@ cd "$ROOT"
 VERSION="${1:-1.0.0}"
 
 APP="build/Build/Products/Release/EPSPreview.app"
-LSREGISTER='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
 echo "════ 1/4  Build app ════"
 bash scripts/build.sh
