@@ -1,0 +1,168 @@
+import Foundation
+import XCTest
+
+/// Covers the caching policy in front of Ghostscript resolution and the
+/// version floor. Both are driven through injected fakes: a real lookup would
+/// depend on whether this machine happens to have Homebrew's `gs`, and on how
+/// long it takes to answer `--version`.
+final class GhostscriptLocatorTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    /// Counts resolver invocations from whichever thread reached it.
+    private final class CallCounter {
+        private let lock = NSLock()
+        private var calls = 0
+
+        func record() {
+            lock.lock()
+            calls += 1
+            lock.unlock()
+        }
+
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return calls
+        }
+    }
+
+    /// Collects one result per concurrent caller.
+    private final class ResultCollector {
+        private let lock = NSLock()
+        private var paths: [String?] = []
+
+        func append(_ path: String?) {
+            lock.lock()
+            paths.append(path)
+            lock.unlock()
+        }
+
+        var collected: [String?] {
+            lock.lock()
+            defer { lock.unlock() }
+            return paths
+        }
+    }
+
+    private func ghostscript(_ path: String) -> GhostscriptLocator.Ghostscript {
+        GhostscriptLocator.Ghostscript(executablePath: path, environment: [:])
+    }
+
+    // MARK: - Caching
+
+    func testSuccessfulResolutionIsCachedForever() {
+        let calls = CallCounter()
+        var now: TimeInterval = 1_000
+        let cache = GhostscriptResolutionCache(failureTTL: 30, clock: { now }, resolve: {
+            calls.record()
+            return GhostscriptLocator.Ghostscript(executablePath: "/opt/homebrew/bin/gs",
+                                                 environment: ["PATH": "/usr/bin:/bin"])
+        })
+
+        XCTAssertEqual(cache.locate()?.executablePath, "/opt/homebrew/bin/gs")
+        XCTAssertEqual(cache.locate()?.executablePath, "/opt/homebrew/bin/gs")
+        now += 86_400
+        XCTAssertEqual(cache.locate()?.executablePath, "/opt/homebrew/bin/gs")
+        XCTAssertEqual(cache.locate()?.environment["PATH"], "/usr/bin:/bin")
+
+        XCTAssertEqual(calls.count, 1, "a resolved Ghostscript must not be looked up twice")
+    }
+
+    func testFailedResolutionIsNotRetriedInsideTheTTL() {
+        let calls = CallCounter()
+        var now: TimeInterval = 1_000
+        let cache = GhostscriptResolutionCache(failureTTL: 30, clock: { now }, resolve: {
+            calls.record()
+            return nil
+        })
+
+        XCTAssertNil(cache.locate())
+        XCTAssertNil(cache.locate())
+        now += 15
+        XCTAssertNil(cache.locate())
+        now += 14.999
+        XCTAssertNil(cache.locate())
+
+        XCTAssertEqual(calls.count, 1, "a hanging or rejected candidate must cost one probe per window")
+    }
+
+    func testFailedResolutionIsRetriedOnceTheTTLExpiresAndThenCached() {
+        let calls = CallCounter()
+        var now: TimeInterval = 1_000
+        var installed: GhostscriptLocator.Ghostscript?
+        let cache = GhostscriptResolutionCache(failureTTL: 30, clock: { now }, resolve: {
+            calls.record()
+            return installed
+        })
+
+        XCTAssertNil(cache.locate())
+        XCTAssertEqual(calls.count, 1)
+
+        // Ghostscript appears after launch; the window has to expire first.
+        installed = ghostscript("/usr/local/bin/gs")
+        now += 29
+        XCTAssertNil(cache.locate(), "still inside the window")
+        XCTAssertEqual(calls.count, 1)
+
+        now += 1
+        XCTAssertEqual(cache.locate()?.executablePath, "/usr/local/bin/gs")
+        XCTAssertEqual(calls.count, 2)
+
+        // And the late success is now cached like any other.
+        now += 86_400
+        XCTAssertEqual(cache.locate()?.executablePath, "/usr/local/bin/gs")
+        XCTAssertEqual(calls.count, 2)
+    }
+
+    func testConcurrentCallersShareOneSlowResolution() {
+        let calls = CallCounter()
+        let results = ResultCollector()
+        let callers = 8
+        let cache = GhostscriptResolutionCache(failureTTL: 30,
+                                               clock: { ProcessInfo.processInfo.systemUptime },
+                                               resolve: {
+            calls.record()
+            // Stands in for `gs --version`: slow enough that every other
+            // caller is inside `locate()` while this one resolves.
+            Thread.sleep(forTimeInterval: 0.1)
+            return GhostscriptLocator.Ghostscript(executablePath: "/opt/local/bin/gs", environment: [:])
+        })
+
+        DispatchQueue.concurrentPerform(iterations: callers) { _ in
+            results.append(cache.locate()?.executablePath)
+        }
+
+        XCTAssertEqual(calls.count, 1, "parallel renders must spawn one version probe, not one each")
+        let collected = results.collected
+        XCTAssertEqual(collected.count, callers)
+        XCTAssertTrue(collected.allSatisfy { $0 == "/opt/local/bin/gs" },
+                      "every caller must receive the single resolution, got \(collected)")
+    }
+
+    // MARK: - Version floor
+
+    private let minimum = (major: 9, minor: 50)
+
+    func testVersionsAtOrAboveTheFloorAreAccepted() {
+        XCTAssertTrue(GhostscriptLocator.versionString("9.50", meetsMinimum: minimum))
+        XCTAssertTrue(GhostscriptLocator.versionString("9.56", meetsMinimum: minimum))
+        XCTAssertTrue(GhostscriptLocator.versionString("10.02.1", meetsMinimum: minimum))
+        XCTAssertTrue(GhostscriptLocator.versionString("10.00", meetsMinimum: minimum))
+    }
+
+    func testVersionsBelowTheFloorAreRejected() {
+        XCTAssertFalse(GhostscriptLocator.versionString("9.49", meetsMinimum: minimum))
+        XCTAssertFalse(GhostscriptLocator.versionString("8.99", meetsMinimum: minimum))
+        // Existing, intentional behaviour: the minor field is compared as
+        // printed, so a one-digit minor reads as 5, not 50.
+        XCTAssertFalse(GhostscriptLocator.versionString("9.5", meetsMinimum: minimum))
+    }
+
+    func testUnparseableVersionsAreRejected() {
+        XCTAssertFalse(GhostscriptLocator.versionString("10", meetsMinimum: minimum))
+        XCTAssertFalse(GhostscriptLocator.versionString("abc", meetsMinimum: minimum))
+        XCTAssertFalse(GhostscriptLocator.versionString("", meetsMinimum: minimum))
+        XCTAssertFalse(GhostscriptLocator.versionString("GPL Ghostscript 9.55", meetsMinimum: minimum))
+    }
+}

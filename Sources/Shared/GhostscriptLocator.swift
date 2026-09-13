@@ -35,20 +35,26 @@ enum GhostscriptLocator {
     /// probe runs before any render, so it needs its own bound.
     private static let versionProbeTimeout: TimeInterval = 5
 
-    private static let cacheLock = NSLock()
-    private static var cachedGhostscript: Ghostscript?
+    /// How long a *failed* lookup is remembered before it is attempted again.
+    /// Long enough that a candidate which hangs until `versionProbeTimeout`
+    /// cannot make every render pay for it, short enough that a Ghostscript
+    /// installed while a Quick Look agent is already alive starts working
+    /// without a logout.
+    private static let failedResolutionTTL: TimeInterval = 30
+
+    private static let resolutionCache = GhostscriptResolutionCache(
+        failureTTL: failedResolutionTTL,
+        clock: { ProcessInfo.processInfo.systemUptime },
+        resolve: { bundledGhostscript() ?? systemGhostscript() })
 
     /// A successful resolution is cached for the life of the process: it costs
     /// several `stat`s plus a `--version` probe and sits on the path of every
-    /// render. A *failed* resolution is deliberately not cached, so a
-    /// long-lived caller still notices a Ghostscript installed after launch.
+    /// render. A *failed* one is cached for `failedResolutionTTL` only: a
+    /// missing, hanging or too-old `gs` then costs one probe per window
+    /// instead of one probe per render, while a Ghostscript installed after
+    /// launch is still picked up — within that window rather than never.
     static func locate() -> Ghostscript? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        if let cachedGhostscript { return cachedGhostscript }
-        let resolved = bundledGhostscript() ?? systemGhostscript()
-        cachedGhostscript = resolved
-        return resolved
+        resolutionCache.locate()
     }
 
     /// The environment a Ghostscript child is allowed to see. Built from
@@ -127,10 +133,22 @@ enum GhostscriptLocator {
 
     private static func meetsMinimumVersion(_ path: String) -> Bool {
         guard let version = probeVersion(path) else { return false }
-        let fields = version.split(separator: ".").compactMap { Int($0) }
+        return versionString(version, meetsMinimum: minimumSystemVersion)
+    }
+
+    /// Compares what `gs --version` printed against a floor. Split out from
+    /// the probe so the comparison can be exercised without an interpreter on
+    /// disk. Anything that does not read as `<major>.<minor>` is rejected
+    /// rather than guessed at, a bare "10" included: a string we cannot parse
+    /// is as likely to come from a substituted binary as from a real release.
+    /// The minor field is compared exactly as printed, so "9.5" is *below*
+    /// "9.50" — Ghostscript writes the two-digit form, and reading "9.5" as
+    /// 9.50 would accept the pre-`-dSAFER` 9.05 line too.
+    static func versionString(_ text: String, meetsMinimum minimum: (major: Int, minor: Int)) -> Bool {
+        let fields = text.split(separator: ".").compactMap { Int($0) }
         guard fields.count >= 2 else { return false }
-        if fields[0] != minimumSystemVersion.major { return fields[0] > minimumSystemVersion.major }
-        return fields[1] >= minimumSystemVersion.minor
+        if fields[0] != minimum.major { return fields[0] > minimum.major }
+        return fields[1] >= minimum.minor
     }
 
     private static func probeVersion(_ path: String) -> String? {
@@ -164,5 +182,55 @@ enum GhostscriptLocator {
         return text.split(whereSeparator: \.isNewline).first.map {
             $0.trimmingCharacters(in: .whitespaces)
         }
+    }
+}
+
+/// The caching policy in front of Ghostscript resolution, kept separate from
+/// the lookup itself so it can be exercised with an injected clock and a fake
+/// resolver instead of a real interpreter on disk.
+///
+/// The lock is held *across* the resolution, not merely around the cache
+/// read/write, and that is deliberate: resolving spawns `gs --version` with a
+/// multi-second bound, and a Finder folder fan-out asks several renders at
+/// once. Serializing them means N concurrent callers spawn one probe and all
+/// receive its result, rather than N probes racing to write the same answer.
+final class GhostscriptResolutionCache {
+
+    private let failureTTL: TimeInterval
+    private let clock: () -> TimeInterval
+    private let resolve: () -> GhostscriptLocator.Ghostscript?
+
+    private let lock = NSLock()
+    private var resolved: GhostscriptLocator.Ghostscript?
+    private var failedAt: TimeInterval?
+
+    /// - Parameters:
+    ///   - failureTTL: how long a nil result is reused before resolving again.
+    ///   - clock: seconds from an arbitrary origin. Production passes
+    ///     `ProcessInfo.processInfo.systemUptime`, which — unlike a wall
+    ///     clock — no time adjustment can move backwards mid-window.
+    ///   - resolve: the actual lookup; run at most once per window.
+    init(failureTTL: TimeInterval,
+         clock: @escaping () -> TimeInterval,
+         resolve: @escaping () -> GhostscriptLocator.Ghostscript?) {
+        self.failureTTL = failureTTL
+        self.clock = clock
+        self.resolve = resolve
+    }
+
+    /// A success is answered from the cache for the life of the instance; a
+    /// failure only until its window expires.
+    func locate() -> GhostscriptLocator.Ghostscript? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let resolved { return resolved }
+        if let failedAt, clock() < failedAt + failureTTL { return nil }
+        guard let found = resolve() else {
+            failedAt = clock()
+            return nil
+        }
+        resolved = found
+        failedAt = nil
+        return found
     }
 }
