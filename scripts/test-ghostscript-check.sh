@@ -153,6 +153,36 @@ else
   fail "rejects a symlink to a 0777 target" "rc=$FIND_RC out=$FIND_OUT"
 fi
 
+# --- root running under sudo -----------------------------------------------
+# Reproduces `sudo scripts/install.sh` against a Homebrew gs owned by the
+# console user (a real, non-root uid), not root — exercised against the pure
+# decision function with the acting uid passed in explicitly, since actually
+# running this suite as root is against this file's own policy above.
+
+if _eps_gs_owner_mode_ok 501 0 755; then
+  pass "root accepts a console-user-owned binary with a safe mode"
+else
+  fail "root accepts a console-user-owned binary" "was rejected"
+fi
+
+if _eps_gs_owner_mode_ok 501 0 777; then
+  fail "root still rejects a world-writable binary" "was accepted"
+else
+  pass "root still rejects a world-writable binary regardless of owner"
+fi
+
+if _eps_gs_owner_mode_ok 999 501 755; then
+  fail "non-root still rejects a third-party-owned binary" "was accepted"
+else
+  pass "non-root still rejects a third-party-owned binary"
+fi
+
+if _eps_gs_owner_mode_ok 501 501 755; then
+  pass "non-root accepts its own safe binary"
+else
+  fail "non-root accepts its own safe binary" "was rejected"
+fi
+
 # --- probe bound ----------------------------------------------------------
 
 PIDFILE="$WORK/hang.pid"

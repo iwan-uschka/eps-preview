@@ -150,8 +150,26 @@ enum GhostscriptLocator {
               let permissions = attributes[.posixPermissions] as? NSNumber else {
             return false
         }
-        guard owner.uint32Value == 0 || owner.uint32Value == getuid() else { return false }
-        return isWritableOnlyByOwner(mode: permissions.int32Value)
+        return isWritableOnlyByOwner(owner: owner.uint32Value,
+                                     currentUID: getuid(),
+                                     mode: permissions.int32Value)
+    }
+
+    /// The ownership-identity half of the check on its own, with the acting
+    /// uid passed in rather than read via `getuid()` — so a test can simulate
+    /// running as root without this process actually needing to be root.
+    ///
+    /// Root can already do anything to any file regardless of who owns it, so
+    /// the owner-identity comparison is skipped when `currentUID == 0` — it
+    /// would otherwise reject the console user's own Homebrew install (owned
+    /// by them, not root) whenever this runs under `sudo`. Even root should
+    /// still refuse a binary any other unprivileged account can overwrite,
+    /// which the mode check below continues to enforce either way.
+    static func isWritableOnlyByOwner(owner: uid_t, currentUID: uid_t, mode: Int32) -> Bool {
+        if currentUID != 0 {
+            guard owner == 0 || owner == currentUID else { return false }
+        }
+        return isWritableOnlyByOwner(mode: mode)
     }
 
     /// The mask half of the check on its own, so the one bit that matters can
