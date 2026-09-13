@@ -108,6 +108,24 @@ eps_gs_version_meets_minimum() {
 # be swapped out by another unprivileged account between this check and the
 # render. BSD `stat -f`: %u is the owner's uid, %p the mode including the
 # file-type bits (masking with 022 ignores those).
+# Pure ownership/mode decision, with the acting uid passed in explicitly (as
+# opposed to reading `id -u` here) so a test can simulate running as root
+# without this shell actually needing to be root.
+#
+# Root can already do anything to any file regardless of who owns it, so the
+# owner-identity comparison is skipped when $2 (the acting uid) is 0 — it
+# would otherwise reject the console user's own Homebrew install (owned by
+# them, not root) whenever this runs under `sudo`. Even root should still
+# refuse a binary any other unprivileged account can overwrite, which the
+# mode check enforces either way.
+_eps_gs_owner_mode_ok() {
+  local owner="$1" current_uid="$2" mode="$3"
+  if [ "$current_uid" -ne 0 ] && [ "$owner" -ne 0 ] && [ "$owner" -ne "$current_uid" ]; then
+    return 1
+  fi
+  [ $(( 8#$mode & 8#22 )) -eq 0 ]
+}
+
 _eps_gs_writable_only_by_owner() {
   local info owner mode
   info="$(stat -f '%u %p' "$1" 2>/dev/null)" || return 1
@@ -115,10 +133,7 @@ _eps_gs_writable_only_by_owner() {
   mode="${info##* }"
   case "$owner" in '' | *[!0-9]*) return 1 ;; esac
   case "$mode" in '' | *[!0-7]*) return 1 ;; esac
-  if [ "$owner" -ne 0 ] && [ "$owner" -ne "$(id -u)" ]; then
-    return 1
-  fi
-  [ $(( 8#$mode & 8#22 )) -eq 0 ]
+  _eps_gs_owner_mode_ok "$owner" "$(id -u)" "$mode"
 }
 
 # Runs `gs --version` under a time bound and prints its first line, trimmed.
