@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Install EPS Preview.app to /Applications and register its Quick Look /
-# Thumbnail extensions. Ensures Ghostscript is present (installs via
-# Homebrew if available).
+# Thumbnail extensions. Checks for a Ghostscript the render service will
+# actually accept, and offers to install one via Homebrew if there is none.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The installer must apply the service's rules, not its own — see the header
+# of this library.
+# shellcheck source=lib/ghostscript-check.sh disable=SC1091
+. "$ROOT/scripts/lib/ghostscript-check.sh"
 APP="$ROOT/build/Build/Products/Release/EPSPreview.app"
 DEST="/Applications/EPSPreview.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -12,14 +16,20 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 [ -d "$APP" ] || { echo "error: not built yet. Run: bash scripts/build.sh"; exit 1; }
 
 echo "── Checking Ghostscript ──"
-if [ -x /opt/homebrew/bin/gs ] || [ -x /usr/local/bin/gs ] || [ -x /opt/local/bin/gs ] || command -v gs >/dev/null 2>&1; then
-  echo "  ✓ Ghostscript found"
+# Any rejected candidate explains itself on stderr, above the summary line.
+if GS_PATH="$(eps_gs_find)"; then
+  echo "  ✓ Ghostscript found: $GS_PATH ($(eps_gs_probe_version "$GS_PATH"))"
 else
+  echo "  ⚠️  No Ghostscript the render service will accept."
   if command -v brew >/dev/null 2>&1; then
     echo "  installing Ghostscript via Homebrew…"
     brew install ghostscript
+    if GS_PATH="$(eps_gs_find)"; then
+      echo "  ✓ Ghostscript found: $GS_PATH ($(eps_gs_probe_version "$GS_PATH"))"
+    else
+      echo "  ⚠️  Still nothing usable — previews will fail until this is fixed."
+    fi
   else
-    echo "  ⚠️  Ghostscript not found and Homebrew unavailable."
     echo "     Install Homebrew (https://brew.sh) then: brew install ghostscript"
   fi
 fi

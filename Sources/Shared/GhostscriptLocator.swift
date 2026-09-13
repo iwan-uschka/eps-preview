@@ -18,6 +18,12 @@ enum GhostscriptLocator {
         let environment: [String: String]
     }
 
+    /// `scripts/lib/ghostscript-check.sh` mirrors this list, the ownership
+    /// vetting and the version floor below in shell, because `scripts/install.sh`
+    /// has to answer "is Ghostscript installed?" with the same rules the service
+    /// will apply — otherwise the installer reports a green check for an
+    /// interpreter every render then refuses. Change anything here and change it
+    /// there too; `scripts/test-ghostscript-check.sh` pins that side.
     private static let systemCandidates = [
         "/opt/homebrew/bin/gs",   // Apple-silicon Homebrew
         "/usr/local/bin/gs",      // Intel Homebrew

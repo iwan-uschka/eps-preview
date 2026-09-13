@@ -34,6 +34,14 @@ Ghostscript is **not bundled** — EPS Preview uses the copy you install via
 Homebrew. That keeps this project small and MIT-licensed, and always uses an
 up-to-date `gs`.
 
+Not *any* `gs`, though. The render service only runs one it finds at
+`/opt/homebrew/bin/gs`, `/usr/local/bin/gs`, `/opt/local/bin/gs` or
+`/usr/bin/gs` — your `PATH` is never searched — that reports version **9.50**
+or newer (where `-dSAFER` became the enforced default), and whose binary and
+containing directory are writable by nobody but their owner. `scripts/install.sh`
+applies exactly the same rules, so it cannot report Ghostscript as found for a
+copy every preview would then refuse.
+
 The `RenderService` only accepts XPC connections from processes whose code
 signature is intact and whose executable lives inside the *same*
 `EPSPreview.app` bundle, so an unrelated local process cannot use it to run
@@ -77,6 +85,9 @@ cd eps-preview
 bash scripts/build.sh      # builds + ad-hoc signs (no Apple Developer account needed)
 bash scripts/install.sh    # installs to /Applications, registers
 ```
+
+`bash scripts/test-ghostscript-check.sh` (plain bash, no dependencies) pins the
+installer's Ghostscript vetting against the service's, using fake `gs` binaries.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
