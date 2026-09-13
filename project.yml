@@ -106,6 +106,28 @@ targets:
         PRODUCT_NAME: RenderService
         INFOPLIST_FILE: Sources/RenderService/Info.plist
 
+  # ──────────────────────────────────────────────────────────────────────
+  # Unit tests for the shared code (Ghostscript resolution cache and version
+  # floor, admission counter, render-outcome rules).
+  #
+  # It compiles Sources/Shared itself rather than depending on one of the app
+  # targets: everything under test lives there, and a dependency on EPSPreview
+  # would drag the host app's Info.plist / entitlements / signing into a plain
+  # library test bundle. This is the one target that may have a generated
+  # Info.plist — there is no hand-written one to protect.
+  # ──────────────────────────────────────────────────────────────────────
+  EPSPreviewTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.Tests
+        PRODUCT_NAME: EPSPreviewTests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   EPSPreview:
     build:
@@ -114,7 +136,10 @@ schemes:
         EPSQuickLook: all
         EPSThumbnail: all
         RenderService: all
+        EPSPreviewTests: [test]
     run:
       config: Release
+    test:
+      targets: [EPSPreviewTests]
     archive:
       config: Release

@@ -19,9 +19,31 @@ enum RenderLimits {
     /// the service indefinitely.
     static let renderTimeout: TimeInterval = 20
 
-    /// The client waits a little longer than the service's own budget, so the
-    /// service's specific message wins whenever it does answer.
-    static let clientDeadline: TimeInterval = renderTimeout + 5
+    /// How the service admits work: at most `maxConcurrentRenders`
+    /// Ghostscript processes run together, and a request that arrives past
+    /// `maxInFlightRenders` is refused straight away instead of queueing
+    /// behind renders that may each take the full timeout. Here rather than in
+    /// RenderService because the client's deadline has to be derived from
+    /// them — a client that gives up while its request is still queued would
+    /// report a timeout for a render the service has not even started.
+    static let maxConcurrentRenders = 3
+    static let maxInFlightRenders = 8
+
+    /// Worst case, in whole render timeouts, for an *accepted* request: the
+    /// queue ahead of it drains `maxConcurrentRenders` at a time, so the last
+    /// of `maxInFlightRenders` only starts in the final wave.
+    static let worstCaseRenderWaves =
+        (maxInFlightRenders + maxConcurrentRenders - 1) / maxConcurrentRenders
+
+    /// The client outwaits the service's whole worst case — queue wait
+    /// included — by half a render budget, so the service's specific message
+    /// wins whenever it does answer. A proportion rather than a fixed few
+    /// seconds: the margin has to cover the service's own SIGTERM→SIGKILL
+    /// grace *and* marshalling a reply that may be `maxOutputBytes` large
+    /// across XPC on a loaded machine — otherwise a slow transfer turns a
+    /// successful render into a generic "did not respond" at the client.
+    static let clientDeadline: TimeInterval =
+        renderTimeout * (TimeInterval(worstCaseRenderWaves) + 0.5)
 }
 
 /// Thin client used by both extensions to talk to the embedded

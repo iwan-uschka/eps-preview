@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Pins scripts/lib/ghostscript-check.sh against fake `gs` binaries, so the
-# installer's idea of a usable Ghostscript cannot drift away from
-# Sources/Shared/GhostscriptLocator.swift unnoticed. Plain bash — no bats, no
+# installer's idea of a usable Ghostscript keeps behaving the way
+# Sources/Shared/GhostscriptLocator.swift does. Plain bash — no bats, no
 # other dependency — so it runs on a clean checkout:
 #
 #   bash scripts/test-ghostscript-check.sh
+#
+# What it does *not* do is read the Swift side. Every case below is the shell
+# library against hand-written fixtures, so a passing run says the library is
+# consistent with its own EPS_GS_MINIMUM_MAJOR/MINOR and candidate list — not
+# that those still match GhostscriptLocator's `minimumSystemVersion`,
+# `systemCandidates` or `versionProbeTimeout`. Parity of the actual values is
+# maintained by hand: change one side and you must read the other.
 #
 # Not wired into scripts/build.sh: that script builds and signs the app and
 # runs no checks of its own.

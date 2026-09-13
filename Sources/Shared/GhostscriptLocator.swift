@@ -41,6 +41,12 @@ enum GhostscriptLocator {
     /// probe runs before any render, so it needs its own bound.
     private static let versionProbeTimeout: TimeInterval = 5
 
+    /// Grace period between the probe's SIGTERM and SIGKILL. `terminate()`
+    /// only *requests* an exit, and the probe runs with the resolution lock
+    /// held — a candidate that traps SIGTERM would otherwise block not just
+    /// this lookup but every later one for the life of the process.
+    private static let versionProbeKillDelay: TimeInterval = 1
+
     /// How long a *failed* lookup is remembered before it is attempted again.
     /// Long enough that a candidate which hangs until `versionProbeTimeout`
     /// cannot make every render pay for it, short enough that a Ghostscript
@@ -56,9 +62,10 @@ enum GhostscriptLocator {
     /// A successful resolution is cached for the life of the process: it costs
     /// several `stat`s plus a `--version` probe and sits on the path of every
     /// render. A *failed* one is cached for `failedResolutionTTL` only: a
-    /// missing, hanging or too-old `gs` then costs one probe per window
-    /// instead of one probe per render, while a Ghostscript installed after
-    /// launch is still picked up — within that window rather than never.
+    /// missing, hanging or too-old `gs` then costs one pass over the
+    /// candidates per window instead of one per render, while a Ghostscript
+    /// installed after launch is still picked up — within that window rather
+    /// than never.
     static func locate() -> Ghostscript? {
         resolutionCache.locate()
     }
@@ -101,6 +108,12 @@ enum GhostscriptLocator {
         return Ghostscript(executablePath: binary.path, environment: childEnvironment(gsLib: gsLib))
     }
 
+    /// Candidates are probed in order, and each probe is bounded only by
+    /// `versionProbeTimeout` — so a lookup that has to walk the whole list can
+    /// take up to `systemCandidates.count × versionProbeTimeout` before it
+    /// gives up (a stale mount backing several prefixes is the plausible
+    /// non-adversarial case). It is that whole pass, not a single probe, that
+    /// `failedResolutionTTL` keeps every later render from repeating.
     private static func systemGhostscript() -> Ghostscript? {
         for path in systemCandidates
         where FileManager.default.isExecutableFile(atPath: path)
@@ -121,7 +134,11 @@ enum GhostscriptLocator {
     /// install path entirely. A same-uid attacker can replace anything this
     /// process is allowed to read, and no check made *by* this process can
     /// change that.
-    private static func hasTrustworthyOwnership(_ path: String) -> Bool {
+    ///
+    /// Not `private`, for the same reason `versionString` is not: this is the
+    /// security control the whole vetting path rests on, and a test can point
+    /// it at a temp file whose permissions it controls.
+    static func hasTrustworthyOwnership(_ path: String) -> Bool {
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         return isWritableOnlyByOwner(resolved.path)
             && isWritableOnlyByOwner(resolved.deletingLastPathComponent().path)
@@ -134,7 +151,15 @@ enum GhostscriptLocator {
             return false
         }
         guard owner.uint32Value == 0 || owner.uint32Value == getuid() else { return false }
-        return permissions.int32Value & 0o022 == 0
+        return isWritableOnlyByOwner(mode: permissions.int32Value)
+    }
+
+    /// The mask half of the check on its own, so the one bit that matters can
+    /// be exercised without a file of controlled ownership on disk — a CI
+    /// sandbox cannot hand a test a binary owned by a third user, but a wrong
+    /// mask here disables the vetting just as completely.
+    static func isWritableOnlyByOwner(mode: Int32) -> Bool {
+        mode & 0o022 == 0
     }
 
     private static func meetsMinimumVersion(_ path: String) -> Bool {
@@ -172,7 +197,14 @@ enum GhostscriptLocator {
             return nil
         }
 
-        let deadline = DispatchWorkItem { process.terminate() }
+        let deadline = DispatchWorkItem {
+            process.terminate()                       // SIGTERM: ask first
+            DispatchQueue.global().asyncAfter(deadline: .now() + versionProbeKillDelay) {
+                // Re-check right before signalling: once Foundation has reaped
+                // the child, its PID may already belong to another process.
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            }
+        }
         DispatchQueue.global().asyncAfter(deadline: .now() + versionProbeTimeout, execute: deadline)
         // `gs --version` prints one short line, so reading to EOF cannot fill
         // the pipe buffer; the work item above bounds a candidate that hangs

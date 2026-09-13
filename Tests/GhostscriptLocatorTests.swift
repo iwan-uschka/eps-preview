@@ -165,4 +165,60 @@ final class GhostscriptLocatorTests: XCTestCase {
         XCTAssertFalse(GhostscriptLocator.versionString("", meetsMinimum: minimum))
         XCTAssertFalse(GhostscriptLocator.versionString("GPL Ghostscript 9.55", meetsMinimum: minimum))
     }
+
+    // MARK: - Ownership and permission vetting
+
+    /// Creates `<temp>/<uuid>/gs` and returns its path, with both the file and
+    /// its containing directory set to the given modes. Owned by this process
+    /// either way — a test cannot hand itself a file owned by a third user, so
+    /// only the permission half is driven through a real file.
+    private func candidate(fileMode: Int, directoryMode: Int) throws -> String {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gs-vetting-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let binary = directory.appendingPathComponent("gs")
+        try Data("#!/bin/sh\n".utf8).write(to: binary)
+        try FileManager.default.setAttributes([.posixPermissions: fileMode],
+                                              ofItemAtPath: binary.path)
+        try FileManager.default.setAttributes([.posixPermissions: directoryMode],
+                                              ofItemAtPath: directory.path)
+        return binary.path
+    }
+
+    func testOwnerOnlyWritableCandidateIsAccepted() throws {
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755)
+        XCTAssertTrue(GhostscriptLocator.hasTrustworthyOwnership(path))
+    }
+
+    func testWorldWritableCandidateIsRejected() throws {
+        let path = try candidate(fileMode: 0o777, directoryMode: 0o755)
+        XCTAssertFalse(GhostscriptLocator.hasTrustworthyOwnership(path))
+    }
+
+    func testGroupWritableCandidateIsRejected() throws {
+        let path = try candidate(fileMode: 0o775, directoryMode: 0o755)
+        XCTAssertFalse(GhostscriptLocator.hasTrustworthyOwnership(path))
+    }
+
+    func testCandidateInAWorldWritableDirectoryIsRejected() throws {
+        // The binary itself is fine; anyone could still replace it wholesale.
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o777)
+        XCTAssertFalse(GhostscriptLocator.hasTrustworthyOwnership(path))
+    }
+
+    func testMissingCandidateIsRejected() {
+        XCTAssertFalse(GhostscriptLocator.hasTrustworthyOwnership(
+            NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString))
+    }
+
+    func testOnlyGroupAndWorldWriteBitsDisqualifyAMode() {
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o755))
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o700))
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o555))
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o775), "group-writable")
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o757), "world-writable")
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o777))
+    }
 }

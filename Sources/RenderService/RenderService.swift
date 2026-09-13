@@ -13,24 +13,30 @@ final class RenderService: NSObject, RenderProtocol {
 
     /// Finder asks for a whole folder of thumbnails at once, and every render
     /// is a separate unsandboxed Ghostscript process with its own time
-    /// budget. Admission is therefore bounded twice: at most
-    /// `maxConcurrentRenders` interpreters run together, and a request that
-    /// arrives past `maxInFlightRenders` is refused straight away instead of
-    /// queueing behind renders that may each take the full timeout.
-    private static let maxConcurrentRenders = 3
-    private static let maxInFlightRenders = 8
-
-    private static let renderSlots = DispatchSemaphore(value: maxConcurrentRenders)
-    private static let inFlightRenders = Atomic(0)
+    /// budget. Admission is therefore bounded twice, by the two limits in
+    /// `RenderLimits`: at most `maxConcurrentRenders` interpreters run
+    /// together, and a request that arrives past `maxInFlightRenders` is
+    /// refused straight away instead of queueing behind renders that may each
+    /// take the full timeout. Both live there, not here, because the client's
+    /// deadline is computed from them.
+    private static let renderSlots = DispatchSemaphore(value: RenderLimits.maxConcurrentRenders)
+    private static let admission = InFlightLimiter(limit: RenderLimits.maxInFlightRenders)
+    /// Hosts both halves of a render that block: the wait for a `renderSlots`
+    /// permit and, once the child is up, its stderr drain. A request is in one
+    /// or the other, never both, so the peak cost is `maxInFlightRenders`
+    /// worker threads parked in waits rather than doing work — cheap at these
+    /// limits, but it scales with `maxInFlightRenders` rather than with
+    /// `maxConcurrentRenders`, so raising that far would be the point to
+    /// replace the blocking gate with an async-friendly one.
     private static let renderQueue = DispatchQueue(
         label: "com.zhangyanbo.EPSPreview.RenderService.render",
         attributes: .concurrent)
 
     /// Ghostscript's stderr is drained continuously, but only its head is
     /// retained: enough for the message we report back, bounded so a chatty
-    /// file cannot grow the service's memory.
+    /// file cannot grow the service's memory. How much of that head reaches
+    /// the reply is `RenderOutcome`'s business.
     private static let maxRetainedErrorBytes = 64 * 1024
-    private static let maxErrorMessageCharacters = 600
 
     /// Grace period between SIGTERM and SIGKILL for a render that overran.
     private static let terminationGracePeriod: TimeInterval = 2
@@ -42,7 +48,7 @@ final class RenderService: NSObject, RenderProtocol {
             return
         }
 
-        guard Self.reserveInFlightSlot() else {
+        guard Self.admission.reserve() else {
             reply(nil, "Too many previews at once. Try again in a moment.")
             return
         }
@@ -54,22 +60,10 @@ final class RenderService: NSObject, RenderProtocol {
             Self.renderSlots.wait()
             self.render(epsData: epsData) { pdf, error in
                 Self.renderSlots.signal()
-                Self.releaseInFlightSlot()
+                Self.admission.release()
                 reply(pdf, error)
             }
         }
-    }
-
-    private static func reserveInFlightSlot() -> Bool {
-        inFlightRenders.withLock { count in
-            guard count < maxInFlightRenders else { return false }
-            count += 1
-            return true
-        }
-    }
-
-    private static func releaseInFlightSlot() {
-        inFlightRenders.withLock { $0 -= 1 }
     }
 
     // MARK: - Running Ghostscript
@@ -153,10 +147,13 @@ final class RenderService: NSObject, RenderProtocol {
                 return pending == 0
             }
             guard isLast else { return }
-            let result = Self.result(for: exited,
-                                     timedOut: didTimeOut.load(),
-                                     errorOutput: errorOutput.load(),
-                                     outputPath: outputPath)
+            let termination = RenderTermination(
+                killedBySignal: exited.terminationReason == .uncaughtSignal,
+                status: exited.terminationStatus,
+                timedOut: didTimeOut.load())
+            let result = RenderOutcome.result(for: termination,
+                                              errorOutput: errorOutput.load(),
+                                              outputPath: outputPath)
             finish(result.pdf, result.error)
         }
 
@@ -185,7 +182,11 @@ final class RenderService: NSObject, RenderProtocol {
         }
 
         let watchdog = DispatchWorkItem {
-            guard !isFinished.load() else { return }
+            // Both guards are needed: `isFinished` only flips once *both*
+            // settle events have landed, so between the child exiting and its
+            // stderr reaching EOF it is still false while the PID is already
+            // reaped — and may already belong to someone else.
+            guard !isFinished.load(), process.isRunning else { return }
             didTimeOut.store(true)
             process.terminate()                       // SIGTERM: let gs clean up
             // A child stuck in an uninterruptible wait ignores SIGTERM, and it
@@ -201,57 +202,4 @@ final class RenderService: NSObject, RenderProtocol {
                                           execute: watchdog)
     }
 
-    // MARK: - Interpreting the outcome
-
-    /// Turns an exited Ghostscript into the reply. `timedOut` alone never
-    /// decides the outcome: a render that finished on its own in the instant
-    /// the watchdog fired still exited normally, and its result is used.
-    private static func result(for process: Process,
-                               timedOut: Bool,
-                               errorOutput: Data,
-                               outputPath: String) -> (pdf: Data?, error: String?) {
-        let killedBySignal = process.terminationReason == .uncaughtSignal
-        let outputLimitMB = RenderLimits.maxOutputBytes / (1024 * 1024)
-
-        if killedBySignal {
-            if timedOut {
-                return (nil, "Ghostscript timed out after \(Int(RenderLimits.renderTimeout))s "
-                    + "and was terminated.")
-            }
-            if process.terminationStatus == SIGXFSZ {
-                return (nil, "The rendered PDF exceeds the \(outputLimitMB) MB preview output limit.")
-            }
-        }
-
-        guard process.terminationStatus == 0 else {
-            return (nil, "Ghostscript exited with status \(process.terminationStatus). "
-                + diagnostic(errorOutput))
-        }
-
-        // Check the size before reading: `pdfwrite` output is bounded by the
-        // child's rlimit, which is a coarse backstop, not this limit.
-        let attributes = try? FileManager.default.attributesOfItem(atPath: outputPath)
-        guard let size = attributes?[.size] as? Int, size > 0 else {
-            return (nil, "Ghostscript reported success but produced no PDF output.")
-        }
-        guard size <= RenderLimits.maxOutputBytes else {
-            return (nil, "The rendered PDF exceeds the \(outputLimitMB) MB preview output limit.")
-        }
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: outputPath)), !data.isEmpty else {
-            return (nil, "Ghostscript reported success but produced no PDF output.")
-        }
-        return (data, nil)
-    }
-
-    /// Ghostscript's diagnostics are not guaranteed UTF-8 — font and DSC
-    /// warnings routinely carry 8-bit bytes taken from the file itself.
-    /// Latin-1 maps every byte 1:1 and never fails (the same fallback
-    /// `wantsInterpolation` relies on), so the real message is never replaced
-    /// by "unknown error".
-    private static func diagnostic(_ errorOutput: Data) -> String {
-        let text = String(data: errorOutput, encoding: .utf8)
-            ?? String(data: errorOutput, encoding: .isoLatin1)
-            ?? "unknown error"
-        return String(text.prefix(maxErrorMessageCharacters))
-    }
 }
