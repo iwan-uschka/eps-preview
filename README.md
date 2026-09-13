@@ -30,9 +30,20 @@ to PDF and returns the bytes. The extension then displays the PDF with
 PDFKit. Because the render happens in the unsandboxed helper, there are no
 sandbox gymnastics around executing `gs` or reading files.
 
-Ghostscript is **not bundled** — EPS Preview uses the copy you install via
-Homebrew. That keeps this project small and MIT-licensed, and always uses an
-up-to-date `gs`.
+A build from source does **not** bundle Ghostscript — it uses the copy you
+install via Homebrew. That keeps this project small and MIT-licensed, and
+always uses an up-to-date `gs`. (The downloadable release does bundle one —
+see [Install](#install).)
+
+Not *any* `gs`, though — and this is about the system copy a source build
+uses; the release's own bundled Ghostscript is pinned and sealed by the app
+signature, so it skips this vetting. The render service only runs a system
+`gs` it finds at `/opt/homebrew/bin/gs`, `/usr/local/bin/gs`, `/opt/local/bin/gs` or
+`/usr/bin/gs` — your `PATH` is never searched — that reports version **9.50**
+or newer (where `-dSAFER` became the enforced default), and whose binary and
+containing directory are writable by nobody but their owner. `scripts/install.sh`
+applies exactly the same rules, so it cannot report Ghostscript as found for a
+copy every preview would then refuse.
 
 The `RenderService` only accepts XPC connections from processes whose code
 signature is intact and whose executable lives inside the *same*
@@ -42,10 +53,18 @@ load-bearing: build via `bash scripts/build.sh`, not a bare `xcodebuild`, or
 previews will fail with "Render service connection failed".
 
 Previews are bounded on purpose: EPS files larger than **100 MB** are refused
-up front, and a single Ghostscript render is terminated after **20 s**
-(`-dSAFER` restricts file/network access but not CPU, so a pathological
-PostScript body could otherwise hang the helper). Both limits live in
-`Sources/RenderService/RenderService.swift`.
+up front, a single Ghostscript render is terminated after **20 s** (`-dSAFER`
+restricts file/network access but not CPU, so a pathological PostScript body
+could otherwise hang the helper), a rendered PDF larger than **64 MB** is
+rejected instead of being read into memory, and at most **3** renders run at
+once with at most **8** requests in flight — a Finder folder full of EPS files
+is throttled rather than fanned out into unbounded Ghostscript processes;
+requests past that are refused with "Too many previews at once." and Finder
+retries them on its next pass. The size, time and concurrency limits all live
+in `RenderLimits` (`Sources/Shared/RenderClient.swift`) — the concurrency
+bounds among them, because the deadline the *client* gives up after is derived
+from them: an admitted request may wait out the queue ahead of it before its
+own render starts.
 
 ## Install
 
@@ -74,6 +93,20 @@ cd eps-preview
 bash scripts/build.sh      # builds + ad-hoc signs (no Apple Developer account needed)
 bash scripts/install.sh    # installs to /Applications, registers
 ```
+
+Tests:
+
+```bash
+xcodegen generate                                # if you haven't built yet
+xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit tests
+bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
+```
+
+The `EPSPreviewTests` target covers `Sources/Shared` — the Ghostscript
+resolution cache and version floor, the admission counter and the
+render-outcome rules. `scripts/test-ghostscript-check.sh` (plain bash, no
+dependencies) pins the installer's Ghostscript vetting against the service's,
+using fake `gs` binaries.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
@@ -113,7 +146,8 @@ New EPS files always get thumbnails immediately.
 | `Sources/QuickLook` | Quick Look preview extension |
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
-| `Sources/Shared` | XPC protocol + client shared by the extensions |
+| `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
+| `Tests` | XCTest unit tests for `Sources/Shared` (`EPSPreviewTests` target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `project.yml` | XcodeGen project definition |
 

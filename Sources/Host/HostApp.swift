@@ -11,9 +11,13 @@ struct EPSPreviewApp: App {
 }
 
 struct ContentView: View {
+    /// Asks the same locator the render service runs, rather than keeping a
+    /// second copy of the candidate list here: this window is the only place a
+    /// user is told whether previews will work, so a green check must mean the
+    /// service accepted that Ghostscript — ownership vetting, 9.50 floor and
+    /// the app's own bundled copy included.
     private var ghostscriptInstalled: Bool {
-        ["/opt/homebrew/bin/gs", "/usr/local/bin/gs", "/opt/local/bin/gs", "/usr/bin/gs"]
-            .contains { FileManager.default.isExecutableFile(atPath: $0) }
+        GhostscriptLocator.locate() != nil
     }
 
     var body: some View {
