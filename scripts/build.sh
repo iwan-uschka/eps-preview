@@ -146,6 +146,11 @@ echo "  ✓ valid"
 # could not exec Ghostscript.
 assert_sandbox_state() {
   local want="$1" path="$2" ents state
+  # Without this, a missing bundle reads as `absent`: codesign fails, leaves a
+  # 0-byte file, PlistBuddy exits 1 on it and the `|| state="absent"` fallback
+  # below turns that into a *pass*. Every `absent` assertion would then hold
+  # vacuously for a path the build forgot to produce.
+  [ -e "$path" ] || { echo "error: no bundle at $path"; exit 1; }
   ents="$(mktemp)"
   codesign -d --entitlements :- --xml "$path" >"$ents" 2>/dev/null || true
   state="$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.app-sandbox" "$ents" 2>/dev/null)" \
@@ -156,11 +161,20 @@ assert_sandbox_state() {
     exit 1; }
   echo "  ✓ app-sandbox $state — ${path#"$APP/"}"
 }
+assert_sandbox_state true   "$APP"
 assert_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
 assert_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
-assert_sandbox_state absent "$APP/Contents/XPCServices/RenderService.xpc"
+
+# The host embeds no render service of its own — assert the absence directly.
+# `assert_sandbox_state absent` cannot express this: it reports `absent` for a
+# path that is missing entirely just as readily as for one that is present and
+# unsandboxed, so it would pass here whether or not the removal held.
+[ ! -e "$APP/Contents/XPCServices/RenderService.xpc" ] || {
+  echo "error: host app still embeds Contents/XPCServices/RenderService.xpc"
+  exit 1; }
+echo "  ✓ no host-level RenderService.xpc"
 
 echo
 echo "✓ Build complete: $APP"
