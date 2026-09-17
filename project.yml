@@ -11,6 +11,15 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    # Pins the concurrency-checking level explicitly instead of inheriting a
+    # toolchain default. Verified inert on Xcode 26.6 at swift-version 5:
+    # `targeted` compiles to a byte-identical swiftc invocation as leaving
+    # this unset, because Xcode only emits a flag for `complete`. Raising it
+    # to `complete` (or moving SWIFT_VERSION to 6.0) currently costs exactly
+    # one real diagnostic — PreviewViewController's QLPreviewingController
+    # conformance crossing into main-actor-isolated code — and wants to be a
+    # deliberate pass, not a silent flip.
+    SWIFT_STRICT_CONCURRENCY: targeted
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     # We hand-maintain every Info.plist and .entitlements file; never let
     # Xcode/XcodeGen synthesize or overwrite them.

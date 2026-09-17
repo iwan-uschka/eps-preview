@@ -1,0 +1,47 @@
+included:
+  - Sources
+
+# Generated / build output. The .xcodeproj is regenerated from project.yml by
+# scripts/build.sh and is not committed; Tests/Fixtures holds binary EPS inputs.
+excluded:
+  - build
+  - DerivedData
+  - out
+  - dist
+  - Tests/Fixtures
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - explicit_init
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - last_where
+  - redundant_nil_coalescing
+  - toggle_bool
+  - unowned_variable_capture
+  - weak_delegate
+
+# Only runs under `swiftlint analyze --compiler-log-path …`, not plain
+# `swiftlint lint`; kept here so an analyze pass picks it up.
+analyzer_rules:
+  - unused_import
+
+# A stray force-unwrap should be visible without failing the run — the
+# codebase currently has none and this keeps it that way.
+force_unwrapping:
+  severity: warning
+
+# This codebase consistently uses trailing commas in multi-line collection
+# literals, so enforce that direction instead of the rule's default ban.
+trailing_comma:
+  mandatory_comma: true
+
+identifier_name:
+  min_length:
+    warning: 2
+    error: 2
+  excluded:
+    - i
