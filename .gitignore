@@ -10,5 +10,13 @@ dist/
 # macOS
 .DS_Store
 
+# Local agent state
+.claude/
+
+# Audit scratch files (may quote local infrastructure details — never track)
+PROBE.md
+AUDIT-REPORT.md
+*.probe.md
+
 # Misc
 *.dmg
