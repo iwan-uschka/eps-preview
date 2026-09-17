@@ -17,6 +17,25 @@ THUMBNAIL_ID=com.zhangyanbo.EPSPreview.Thumbnail
 
 [ -d "$APP" ] || { echo "error: not built yet. Run: bash scripts/build.sh"; exit 1; }
 
+# Each extension must carry its own copy of the render service — a sandboxed
+# appex can only reach an XPC service inside its own bundle, so an extension
+# without one previews nothing. `codesign --verify --deep --strict` below does
+# not catch this: deep verification only checks nested code that is actually
+# present, it never asserts that something ought to be there. Measured — it
+# returns 0 on an app whose extensions have had XPCServices removed.
+assert_embedded_service() {
+  local appex="$1"
+  [ -d "$APP/Contents/PlugIns/$appex/Contents/XPCServices/RenderService.xpc" ] || {
+    echo "error: $appex is missing its embedded RenderService.xpc."
+    echo "       This usually means \`xcodebuild ... test\` ran after \`build.sh\` and"
+    echo "       silently stripped it (Xcode's test-phase rebuild only produces the"
+    echo "       app; build.sh is the only thing that re-embeds). Rerun: bash scripts/build.sh"
+    exit 1
+  }
+}
+assert_embedded_service EPSQuickLook.appex
+assert_embedded_service EPSThumbnail.appex
+
 # Poll for the observable condition instead of guessing a sleep duration —
 # LaunchServices/PluginKit take arbitrarily long on a loaded machine.
 wait_until() {
