@@ -102,6 +102,10 @@ xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit 
 bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
 ```
 
+`xcodebuild ... test` rebuilds the app itself, but only `build.sh` embeds
+each extension's `RenderService.xpc` — so a test run strips it again. Rerun
+`bash scripts/build.sh` before `install.sh` if you've just run the tests.
+
 The `EPSPreviewTests` target covers `Sources/Shared` — the Ghostscript
 resolution cache and version floor, the admission counter and the
 render-outcome rules. `scripts/test-ghostscript-check.sh` (plain bash, no
