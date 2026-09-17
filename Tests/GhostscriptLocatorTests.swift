@@ -213,6 +213,43 @@ final class GhostscriptLocatorTests: XCTestCase {
             NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString))
     }
 
+    // MARK: - Sandbox-safe presence check (host app's status window)
+
+    func testPresenceCheckAcceptsAnOwnerOnlyWritableCandidate() throws {
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755)
+        XCTAssertTrue(GhostscriptLocator.anySystemCandidateIsPresent([path]))
+    }
+
+    func testPresenceCheckIgnoresExecutability() throws {
+        // The whole point of this entry point: the host app is sandboxed, and
+        // the sandbox fails `access(X_OK)` with EPERM even for a gs that is
+        // really there and really executable. So a candidate that carries no
+        // execute bit at all must still read as present — the executability
+        // question is the render service's, and it runs unsandboxed.
+        let path = try candidate(fileMode: 0o644, directoryMode: 0o755)
+        XCTAssertFalse(FileManager.default.isExecutableFile(atPath: path))
+        XCTAssertTrue(GhostscriptLocator.anySystemCandidateIsPresent([path]))
+    }
+
+    func testPresenceCheckStillAppliesOwnershipVetting() throws {
+        // Metadata reads survive the sandbox, so this half of the vetting is
+        // kept rather than dropped along with the exec probe.
+        let path = try candidate(fileMode: 0o777, directoryMode: 0o755)
+        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent([path]))
+    }
+
+    func testPresenceCheckRejectsAnEmptyOrAllMissingCandidateList() {
+        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent([]))
+        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent(
+            [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString]))
+    }
+
+    func testPresenceCheckScansPastAMissingCandidate() throws {
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755)
+        XCTAssertTrue(GhostscriptLocator.anySystemCandidateIsPresent(
+            [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString, path]))
+    }
+
     func testRootAcceptsAConsoleUserOwnedBinaryWithASafeMode() {
         // Reproduces `sudo scripts/install.sh` against a Homebrew gs owned by
         // the console user (uid 501), not root — must not be rejected just

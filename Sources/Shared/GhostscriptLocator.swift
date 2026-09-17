@@ -70,6 +70,45 @@ enum GhostscriptLocator {
         resolutionCache.locate()
     }
 
+    /// Whether *a* Ghostscript appears to be installed, answered without
+    /// executing anything — for the host app's status window.
+    ///
+    /// The host app is sandboxed (`Sources/Host/Host.entitlements`) and
+    /// `locate()` cannot be used from inside that sandbox. Measured on macOS
+    /// 26 / Xcode 27 with an ad-hoc-signed bundle carrying only
+    /// `com.apple.security.app-sandbox`, against a real Homebrew gs:
+    ///
+    ///   * `isExecutableFile(atPath:)` → false; `access(path, X_OK)` fails
+    ///     with EPERM, so `systemGhostscript()`'s `where` clause rejects every
+    ///     candidate before any other check runs.
+    ///   * `Process.run()` on that same path throws `NSCocoaErrorDomain` 4,
+    ///     "The file gs doesn't exist" — so even a relaxed presence test could
+    ///     not reach the `--version` floor.
+    ///   * `fileExists(atPath:)` and `attributesOfItem(atPath:)` both still
+    ///     succeed, including through Homebrew's symlink into `../Cellar`.
+    ///
+    /// So the sandbox permits exactly the metadata half of the vetting, and
+    /// this reports that half: the same candidate list, the same ownership
+    /// rules, no executability probe and no version floor. That makes it
+    /// strictly weaker than what the (unsandboxed) render service enforces —
+    /// a pre-9.50 gs is reported as installed here and then refused at render
+    /// time. Reporting a usable Ghostscript as missing was judged the worse
+    /// error: it sends the user to `brew install ghostscript` for a package
+    /// they already have.
+    static func isLikelyInstalled() -> Bool {
+        bundledGhostscript() != nil || anySystemCandidateIsPresent(systemCandidates)
+    }
+
+    /// The candidate-scan half of `isLikelyInstalled()`, with the list passed
+    /// in — same reason `versionString` and the ownership checks are split out:
+    /// so a test can point it at files whose existence and permissions it
+    /// controls, rather than at whatever `gs` the build machine happens to have.
+    static func anySystemCandidateIsPresent(_ candidates: [String]) -> Bool {
+        candidates.contains {
+            FileManager.default.fileExists(atPath: $0) && hasTrustworthyOwnership($0)
+        }
+    }
+
     /// The environment a Ghostscript child is allowed to see. Built from
     /// scratch rather than inherited: `gs` honors GS_OPTIONS (prepended as if
     /// typed on the command line), GS_FONTPATH and `-I` grants, and dyld
