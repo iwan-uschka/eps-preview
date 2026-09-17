@@ -13,8 +13,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private let pdfView: PDFView = {
         let view = PDFView()
         view.autoScales = true
-        view.displayMode = .singlePage
-        view.displaysPageBreaks = false
+        view.displayBox = PDFPageGeometry.displayBox
         view.backgroundColor = .clear
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
@@ -58,7 +57,12 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let data, let document = PDFDocument(data: data) {
-                    for i in 0..<document.pageCount { document.page(at: i)?.rotation = 0 }
+                    // A one-page EPS should fill the panel edge to edge, but a
+                    // multi-page PostScript file has to scroll with visible page
+                    // breaks — otherwise page 1 looks like the whole file.
+                    let isMultiPage = document.pageCount > 1
+                    self.pdfView.displayMode = isMultiPage ? .singlePageContinuous : .singlePage
+                    self.pdfView.displaysPageBreaks = isMultiPage
                     // Honor the source's interpolation intent: nearest-neighbour
                     // by default (keeps pixel figures crisp), smoothing only when
                     // the EPS explicitly asked for it.
@@ -68,8 +72,11 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                     self.errorLabel.isHidden = true
                     handler(nil)
                 } else {
-                    // Surface the error in-panel AND report it, so the user
-                    // sees why (e.g. Ghostscript missing) rather than a blank.
+                    // The reason (e.g. Ghostscript missing) is surfaced in the
+                    // panel itself, and the handler still reports no error: its
+                    // error argument tells Quick Look that no preview is
+                    // available, which drops this view controller — and the
+                    // message we just put in it — for a generic placeholder.
                     self.pdfView.isHidden = true
                     self.errorLabel.stringValue = errorMessage ?? "Could not render this EPS file."
                     self.errorLabel.isHidden = false

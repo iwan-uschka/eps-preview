@@ -1,10 +1,10 @@
-import AppKit
+import Foundation
 import PDFKit
 import QuickLookThumbnailing
 
 /// Finder / Spotlight thumbnail extension. Renders the EPS to PDF (via the
-/// embedded RenderService), rasterizes the first page, and hands the image
-/// back to Quick Look as a file.
+/// embedded RenderService) and draws its first page straight into the context
+/// Quick Look hands us.
 final class ThumbnailProvider: QLThumbnailProvider {
 
     override func provideThumbnail(for request: QLFileThumbnailRequest,
@@ -17,56 +17,38 @@ final class ThumbnailProvider: QLThumbnailProvider {
 
             guard let data,
                   let document = PDFDocument(data: data),
-                  let page = document.page(at: 0),
-                  let cgPage = page.pageRef else {
+                  let firstPage = document.page(at: 0) else {
                 fail(errorMessage ?? "Thumbnail render failed")
                 return
             }
 
-            let box = page.bounds(for: .mediaBox)
-            guard box.width > 0, box.height > 0 else { fail("Empty page"); return }
+            let pageSize = PDFPageGeometry.displaySize(of: firstPage)
+            guard pageSize.width > 0, pageSize.height > 0 else { fail("Empty page"); return }
 
-            let (pxW, pxH) = thumbnailPixelSize(box: box,
-                                                maximumSize: request.maximumSize,
-                                                scale: request.scale)
+            let layout = thumbnailLayout(pageSize: pageSize,
+                                         maximumSize: request.maximumSize,
+                                         minimumSize: request.minimumSize)
+            let pageRect = layout.pageRect
 
-            guard let context = CGContext(
-                data: nil, width: pxW, height: pxH,
-                bitsPerComponent: 8, bytesPerRow: 0,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                fail("Could not create bitmap context"); return
-            }
+            handler(QLThumbnailReply(contextSize: layout.contextSize) { context in
+                // The block runs after this method returns and PDFPage refers
+                // to its document weakly, so the document — not just the page —
+                // has to be captured to keep the page drawable.
+                guard let page = document.page(at: 0) else { return false }
 
-            // White page background (documents render on white).
-            context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: pxW, height: pxH))
+                // White page background (documents render on white).
+                context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+                context.fill(pageRect)
 
-            // Honor the source's interpolation intent (see RenderClient).
-            context.interpolationQuality = interpolate ? .high : .none
+                // Honor the source's interpolation intent (see RenderClient).
+                context.interpolationQuality = interpolate ? .high : .none
 
-            context.scaleBy(x: CGFloat(pxW) / box.width, y: CGFloat(pxH) / box.height)
-            context.translateBy(x: -box.origin.x, y: -box.origin.y)
-            context.drawPDFPage(cgPage)
-
-            guard let cgImage = context.makeImage() else {
-                fail("Could not rasterize page"); return
-            }
-            let bitmap = NSBitmapImageRep(cgImage: cgImage)
-            guard let png = bitmap.representation(using: .png, properties: [:]) else {
-                fail("Could not encode thumbnail"); return
-            }
-
-            let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("epsthumb-\(UUID().uuidString).png")
-            do {
-                try png.write(to: outURL)
-            } catch {
-                fail("Could not write thumbnail: \(error.localizedDescription)")
-                return
-            }
-
-            handler(QLThumbnailReply(imageFileURL: outURL), nil)
+                context.translateBy(x: pageRect.origin.x, y: pageRect.origin.y)
+                context.scaleBy(x: pageRect.width / pageSize.width,
+                                y: pageRect.height / pageSize.height)
+                page.draw(with: PDFPageGeometry.displayBox, to: context)
+                return true
+            }, nil)
         }
     }
 }
