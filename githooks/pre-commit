@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Fast pre-commit gate: shellcheck the shell scripts you are about to commit,
+# SwiftLint the Swift sources you are about to commit.
+#
+# Only staged files are checked — a commit-time hook that walked the whole
+# tree would be slow enough that people would stop using it.
+#
+# Opt in per clone (git cannot force a hooks path from a committed file):
+#   git config core.hooksPath githooks
+#
+# Emergency bypass:
+#   SKIP_HOOKS=1 git commit …
+set -euo pipefail
+
+if [ "${SKIP_HOOKS:-0}" != "0" ]; then
+  echo "pre-commit: skipped (SKIP_HOOKS=${SKIP_HOOKS})"
+  exit 0
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+staged() {
+  git diff --cached --name-only --diff-filter=ACM -z -- "$@"
+}
+
+shell_files=()
+while IFS= read -r -d '' f; do
+  shell_files+=("$f")
+done < <(staged 'scripts/*.sh' githooks/pre-commit githooks/pre-push)
+
+swift_files=()
+while IFS= read -r -d '' f; do
+  swift_files+=("$f")
+done < <(staged '*.swift')
+
+# Both linters always run, so one failure never hides the other.
+failed=0
+
+echo "── (1/2) shellcheck ──"
+if [ ${#shell_files[@]} -eq 0 ]; then
+  echo "  no staged shell scripts"
+elif ! command -v shellcheck >/dev/null 2>&1; then
+  echo "error: shellcheck not found. Install with: brew install shellcheck"
+  failed=1
+elif shellcheck "${shell_files[@]}"; then
+  echo "  ✓ ${#shell_files[@]} file(s) clean"
+else
+  failed=1
+fi
+
+echo
+echo "── (2/2) SwiftLint ──"
+if [ ${#swift_files[@]} -eq 0 ]; then
+  echo "  no staged Swift sources"
+elif [ ! -f .swiftlint.yml ]; then
+  echo "  swiftlint config not present yet, skipping"
+elif ! command -v swiftlint >/dev/null 2>&1; then
+  echo "error: swiftlint not found. Install with: brew install swiftlint"
+  failed=1
+elif swiftlint lint --quiet --force-exclude "${swift_files[@]}"; then
+  echo "  ✓ ${#swift_files[@]} file(s) clean"
+else
+  failed=1
+fi
+
+if [ "$failed" -ne 0 ]; then
+  echo
+  echo "pre-commit: checks failed. Fix them, or bypass with SKIP_HOOKS=1 git commit …"
+  exit 1
+fi

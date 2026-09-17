@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Pre-push gate: the full build must pass before anything leaves this machine.
+#
+# Slow on purpose. scripts/build.sh is the only thing in this repo that
+# asserts the ad-hoc signature graph still holds, and a broken graph means
+# every preview fails at runtime with "Render service connection failed" —
+# a failure mode that no amount of source review catches.
+#
+# Opt in per clone (git cannot force a hooks path from a committed file):
+#   git config core.hooksPath githooks
+#
+# Emergency bypass:
+#   SKIP_HOOKS=1 git push …
+set -euo pipefail
+
+if [ "${SKIP_HOOKS:-0}" != "0" ]; then
+  echo "pre-push: skipped (SKIP_HOOKS=${SKIP_HOOKS})"
+  exit 0
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+echo "── pre-push: bash scripts/build.sh ──"
+bash scripts/build.sh
+
+echo
+echo "✓ pre-push: build clean"
