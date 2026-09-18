@@ -24,6 +24,8 @@ EXPECTED_GHOSTSCRIPT_VERSION="10.07.1"
 # pins that closure by hash the way EXPECTED_GHOSTSCRIPT_VERSION pins gs.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPENDENCY_MANIFEST="$ROOT/scripts/ghostscript-dependencies.txt"
+# shellcheck source=lib/ghostscript-manifest.sh disable=SC1091
+. "$ROOT/scripts/lib/ghostscript-manifest.sh"
 
 OUT="${1:?usage: bundle-ghostscript.sh <output-dir>}"
 
@@ -153,24 +155,31 @@ echo "→ recording provenance…"
 
 echo "→ checking the bundled library closure…"
 bundled_libs() { sed -n 's/^lib_sha256=//p' "$OUT/GHOSTSCRIPT_PROVENANCE.txt"; }
-if [ ! -f "$DEPENDENCY_MANIFEST" ]; then
-  bundled_libs > "$DEPENDENCY_MANIFEST"
-  echo "   recorded $(bundled_libs | wc -l | tr -d ' ') libraries in ${DEPENDENCY_MANIFEST#"$ROOT"/}"
-  echo "   — commit it so later builds are checked against this closure."
-elif ! MANIFEST_DIFF="$(diff -u "$DEPENDENCY_MANIFEST" <(bundled_libs))"; then
-  if [ "${ALLOW_DEPENDENCY_MANIFEST_MISMATCH:-0}" != "1" ]; then
-    echo "error: the bundled library closure no longer matches ${DEPENDENCY_MANIFEST#"$ROOT"/}."
-    printf '%s\n' "$MANIFEST_DIFF" | tail -n +3 | sed 's/^/       /'
-    echo "       Ghostscript itself is still $EXPECTED_GHOSTSCRIPT_VERSION, but these are the"
-    echo "       libraries it parses untrusted image/font data with, so their CVE exposure"
-    echo "       changed. Review their changelogs/CVEs, then either:"
-    echo "         - update ${DEPENDENCY_MANIFEST#"$ROOT"/} to the closure above (delete it and re-run to regenerate), or"
-    echo "         - pin Homebrew to the recorded revisions."
-    echo "       To bundle anyway (not recommended), re-run with ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1."
-    exit 1
-  fi
-  echo "warning: bundling a library closure that differs from ${DEPENDENCY_MANIFEST#"$ROOT"/}"
-fi
+MANIFEST_DIFF=""
+MANIFEST_RC=0
+MANIFEST_DIFF="$(bundled_libs | eps_manifest_check "$DEPENDENCY_MANIFEST")" || MANIFEST_RC=$?
+case "$MANIFEST_RC" in
+  0) ;;
+  2)
+    bundled_libs > "$DEPENDENCY_MANIFEST"
+    echo "   recorded $(bundled_libs | wc -l | tr -d ' ') libraries in ${DEPENDENCY_MANIFEST#"$ROOT"/}"
+    echo "   — commit it so later builds are checked against this closure."
+    ;;
+  *)
+    if [ "${ALLOW_DEPENDENCY_MANIFEST_MISMATCH:-0}" != "1" ]; then
+      echo "error: the bundled library closure no longer matches ${DEPENDENCY_MANIFEST#"$ROOT"/}."
+      printf '%s\n' "$MANIFEST_DIFF" | sed 's/^/       /'
+      echo "       Ghostscript itself is still $EXPECTED_GHOSTSCRIPT_VERSION, but these are the"
+      echo "       libraries it parses untrusted image/font data with, so their CVE exposure"
+      echo "       changed. Review their changelogs/CVEs, then either:"
+      echo "         - update ${DEPENDENCY_MANIFEST#"$ROOT"/} to the closure above (delete it and re-run to regenerate), or"
+      echo "         - pin Homebrew to the recorded revisions."
+      echo "       To bundle anyway (not recommended), re-run with ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1."
+      exit 1
+    fi
+    echo "warning: bundling a library closure that differs from ${DEPENDENCY_MANIFEST#"$ROOT"/}"
+    ;;
+esac
 
 echo "→ verifying the assembled tree…"
 for dir in "$OUT/share/Resource/Init" "$OUT/share/lib"; do
@@ -190,14 +199,21 @@ fi
 "$OUT/converter" --version >/dev/null
 
 PROBE="$(mktemp -d)"
+# Cleaned up from a trap, not just on the success path: the probe-render check
+# below exits 1, and a script that leaks a temp directory on every failed run
+# litters $TMPDIR while it is being worked on.
+trap 'rm -rf "$PROBE"' EXIT INT TERM
 cat > "$PROBE/probe.eps" <<'EOF'
 %!PS-Adobe-3.0 EPSF-3.0
 %%BoundingBox: 0 0 8 8
 0.5 setgray 0 0 8 8 rectfill
 showpage
 EOF
-# Same GS_LIB layout and argument set RenderService.bundledGhostscript() uses,
-# so this exercises the tree exactly the way the shipped app will. A correct
+# Same GS_LIB layout GhostscriptLocator.bundledGhostscript() builds, and the
+# same gs flags RenderService.render() passes (minus -sstdout=%stderr, which
+# only matters for keeping fd 1 empty in production — this probe merges
+# stdout/stderr itself via 2>&1 below, and minus the `sh -c 'ulimit …'`
+# wrapper), so this exercises the tree the way the shipped app will. A correct
 # tree renders this silently; gs falls back to its compiled-in Homebrew
 # resource path when the bundled one is unusable, and the only trace of that
 # on a machine that has Homebrew is the warning it prints — so any output here
@@ -211,6 +227,5 @@ if [ ! -s "$PROBE/probe.pdf" ] || [ -n "$PROBE_LOG" ]; then
   printf '%s\n' "$PROBE_LOG" | sed 's/^/       /'
   exit 1
 fi
-rm -rf "$PROBE"
 
 echo "✓ self-contained Ghostscript at $OUT ($(du -sh "$OUT" | cut -f1))"

@@ -17,6 +17,13 @@ License v3.0 (AGPL-3.0)**.
   version and hash of the build you have; it is sourced from Homebrew's
   `ghostscript` formula for that version).
 
+The bundled Ghostscript also carries the shared libraries it links against
+(libfreetype, libtiff, libopenjp2, libidn, libintl, libtesseract and others —
+the exact set and hashes are in `scripts/ghostscript-dependencies.txt` and in
+the shipped `GHOSTSCRIPT_PROVENANCE.txt`). Each remains under its own license
+(FTL/GPLv2, LGPL, Apache-2.0, BSD and similar); they are sourced unmodified
+from Homebrew's formulae.
+
 When you **build from source** (`scripts/build.sh`) instead of using a
 release, Ghostscript is **not** bundled — the app calls the copy you install
 yourself via Homebrew — so the build-from-source app is MIT all the way down.

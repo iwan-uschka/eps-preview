@@ -1,8 +1,12 @@
 included:
   - Sources
+  - Tests
 
-# Generated / build output. The .xcodeproj is regenerated from project.yml by
-# scripts/build.sh and is not committed; Tests/Fixtures holds binary EPS inputs.
+# Generated / build output lives outside the `included` trees above, so those
+# entries document intent without affecting lint scope. `Tests/Fixtures` is the
+# one that does work: now that `Tests` is linted, it keeps the binary EPS inputs
+# there out of the scan. Both Sources and Tests are linted so the pre-commit
+# hook, which passes staged paths explicitly, agrees with a bare `swiftlint` run.
 excluded:
   - build
   - DerivedData
@@ -25,7 +29,9 @@ opt_in_rules:
   - weak_delegate
 
 # Only runs under `swiftlint analyze --compiler-log-path …`, not plain
-# `swiftlint lint`; kept here so an analyze pass picks it up.
+# `swiftlint lint`; not currently wired into any script or CI job — add
+# an `swiftlint analyze` invocation (e.g. in scripts/build.sh) before
+# relying on this catching anything.
 analyzer_rules:
   - unused_import
 
@@ -43,5 +49,3 @@ identifier_name:
   min_length:
     warning: 2
     error: 2
-  excluded:
-    - i

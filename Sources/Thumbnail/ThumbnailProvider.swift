@@ -25,7 +25,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
             let pageSize = PDFPageGeometry.displaySize(of: firstPage)
             guard pageSize.width > 0, pageSize.height > 0 else { fail("Empty page"); return }
 
-            let layout = thumbnailLayout(pageSize: pageSize,
+            let layout = ThumbnailGeometry.layout(pageSize: pageSize,
                                          maximumSize: request.maximumSize,
                                          minimumSize: request.minimumSize)
             let pageRect = layout.pageRect
@@ -36,9 +36,12 @@ final class ThumbnailProvider: QLThumbnailProvider {
                 // has to be captured to keep the page drawable.
                 guard let page = document.page(at: 0) else { return false }
 
-                // White page background (documents render on white).
+                // White background over the whole canvas, not just the fitted
+                // page: ThumbnailGeometry.layout pads the context out to the
+                // requested minimum, and that letterbox margin would
+                // otherwise stay transparent (documents render on white).
                 context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-                context.fill(pageRect)
+                context.fill(CGRect(origin: .zero, size: layout.contextSize))
 
                 // Honor the source's interpolation intent (see RenderClient).
                 context.interpolationQuality = interpolate ? .high : .none

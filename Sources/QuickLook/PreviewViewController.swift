@@ -57,12 +57,11 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let data, let document = PDFDocument(data: data) {
-                    // A one-page EPS should fill the panel edge to edge, but a
-                    // multi-page PostScript file has to scroll with visible page
-                    // breaks — otherwise page 1 looks like the whole file.
-                    let isMultiPage = document.pageCount > 1
-                    self.pdfView.displayMode = isMultiPage ? .singlePageContinuous : .singlePage
-                    self.pdfView.displaysPageBreaks = isMultiPage
+                    // Paging rule (single page vs scrolling with page breaks)
+                    // lives in PreviewPageLayout so it can be tested directly.
+                    let layout = PreviewPageLayout.displayMode(forPageCount: document.pageCount)
+                    self.pdfView.displayMode = layout.mode
+                    self.pdfView.displaysPageBreaks = layout.showsPageBreaks
                     // Honor the source's interpolation intent: nearest-neighbour
                     // by default (keeps pixel figures crisp), smoothing only when
                     // the EPS explicitly asked for it.

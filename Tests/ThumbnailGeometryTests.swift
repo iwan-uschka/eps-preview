@@ -11,42 +11,42 @@ final class ThumbnailGeometryTests: XCTestCase {
     // MARK: - Fitting into the maximum
 
     func testFitsSquarePageToRequestedMaximum() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 64))
     }
 
     func testLandscapePageIsLetterboxedNotStretched() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 200, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 200, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 32))
     }
 
     func testPortraitPageIsLetterboxedNotStretched() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 200),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 200),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 32, height: 64))
     }
 
     func testNonSquareMaximumUsesTheTighterAxis() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 100),
                                      maximumSize: CGSize(width: 200, height: 50),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 50, height: 50))
     }
 
     func testPageSmallerThanMaximumIsScaledUpToFill() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 8, height: 4),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 8, height: 4),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 32))
     }
 
     func testUnpaddedPageRectCoversTheWholeContext() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 200, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 200, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.pageRect, CGRect(x: 0, y: 0, width: 64, height: 32))
@@ -56,14 +56,14 @@ final class ThumbnailGeometryTests: XCTestCase {
 
     func testContextIsPaddedToMinimumOnBothAxes() {
         // Fitted is 64×64, so a 100×100 minimum pads both ways.
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: CGSize(width: 100, height: 100))
         XCTAssertEqual(layout.contextSize, CGSize(width: 100, height: 100))
     }
 
     func testPaddedPageIsCenteredInTheContext() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: CGSize(width: 100, height: 100))
         // (100 - 64) / 2 on each axis, and the page keeps its fitted size —
@@ -75,7 +75,7 @@ final class ThumbnailGeometryTests: XCTestCase {
         // A wide page fits to 64×32. A 40×40 minimum is already satisfied on
         // width but not on height, so only height is padded — and only that
         // axis gets a centering offset.
-        let layout = thumbnailLayout(pageSize: CGSize(width: 200, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 200, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: CGSize(width: 40, height: 40))
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 40))
@@ -83,7 +83,7 @@ final class ThumbnailGeometryTests: XCTestCase {
     }
 
     func testMinimumSmallerThanFittedAddsNoPadding() {
-        let layout = thumbnailLayout(pageSize: CGSize(width: 100, height: 100),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 100, height: 100),
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: CGSize(width: 16, height: 16))
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 64))
@@ -95,18 +95,28 @@ final class ThumbnailGeometryTests: XCTestCase {
     func testExtremeAspectRatioClampsShortAxisToOnePoint() {
         // Fits to 16×0.016, which would be a zero-height context once Quick
         // Look rasterizes it.
-        let layout = thumbnailLayout(pageSize: CGSize(width: 500, height: 0.5),
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 500, height: 0.5),
                                      maximumSize: CGSize(width: 16, height: 16),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 16, height: 1))
         XCTAssertEqual(layout.pageRect, CGRect(x: 0, y: 0, width: 16, height: 1))
     }
 
+    func testExtremeAspectRatioClampsNarrowAxisToOnePoint() {
+        // Mirror of the height-clamp case: a very tall, thin page fits to
+        // 0.016×16, which would be a zero-width context without the clamp.
+        let layout = ThumbnailGeometry.layout(pageSize: CGSize(width: 0.5, height: 500),
+                                     maximumSize: CGSize(width: 16, height: 16),
+                                     minimumSize: noMinimum)
+        XCTAssertEqual(layout.contextSize, CGSize(width: 1, height: 16))
+        XCTAssertEqual(layout.pageRect, CGRect(x: 0, y: 0, width: 1, height: 16))
+    }
+
     func testPageOriginIsIrrelevantBecauseOnlySizeIsTaken() {
         // Kept from the pixel-size tests this replaced: the media box's origin
         // must never reach the layout. It cannot now — the signature takes a
         // CGSize — and this pins that it stays that way.
-        let layout = thumbnailLayout(pageSize: CGRect(x: -37, y: 512, width: 120, height: 90).size,
+        let layout = ThumbnailGeometry.layout(pageSize: CGRect(x: -37, y: 512, width: 120, height: 90).size,
                                      maximumSize: CGSize(width: 64, height: 64),
                                      minimumSize: noMinimum)
         XCTAssertEqual(layout.contextSize, CGSize(width: 64, height: 48))

@@ -109,11 +109,15 @@ targets:
     sources:
       - path: Sources/RenderService
       - path: Sources/Shared
-        # The service renders, it never displays: keeping the PDFKit-only
-        # display geometry out of this target keeps the unsandboxed helper's
-        # linked frameworks unchanged.
+        # The service renders, it never displays: keeping display-only
+        # geometry and paging rules out of this target avoids drift between
+        # what's compiled here and what's actually used, and keeps the
+        # unsandboxed helper's linked frameworks unchanged for the PDFKit
+        # ones (PDFPageGeometry, PreviewPageLayout).
         excludes:
           - PDFPageGeometry.swift
+          - PreviewPageLayout.swift
+          - ThumbnailGeometry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.RenderService
@@ -122,8 +126,9 @@ targets:
 
   # ──────────────────────────────────────────────────────────────────────
   # Unit tests for the shared code (Ghostscript resolution cache and version
-  # floor, admission counter, render-outcome rules) plus fixture-backed
-  # coverage for BundleLayout and thumbnail geometry.
+  # floor, admission counter, render-outcome rules, page geometry and preview
+  # paging) plus fixture-backed coverage for BundleLayout and thumbnail
+  # geometry.
   #
   # It compiles Sources/Shared itself rather than depending on one of the app
   # targets: everything under test lives there, and a dependency on EPSPreview

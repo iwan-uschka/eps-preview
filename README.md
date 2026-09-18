@@ -100,13 +100,21 @@ Tests:
 xcodegen generate                                # if you haven't built yet
 xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit tests
 bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
+bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
+bash scripts/test-githooks.sh                    # the git hooks' own logic
 ```
 
 The `EPSPreviewTests` target covers `Sources/Shared` — the Ghostscript
-resolution cache and version floor, the admission counter and the
-render-outcome rules. `scripts/test-ghostscript-check.sh` (plain bash, no
-dependencies) pins the installer's Ghostscript vetting against the service's,
-using fake `gs` binaries.
+resolution cache and version floor, the admission counter, the render-outcome
+rules, the app-bundle layout helper, the thumbnail geometry and the page
+geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
+inputs, which are checked for structural integrity so a truncated fixture fails
+loudly. The three plain-bash suites (no dependencies) cover the shell side:
+`scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
+against the service's using fake `gs` binaries,
+`scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
+against fake manifests, and `scripts/test-githooks.sh` pins the pre-commit and
+pre-push hooks against throwaway repos and stubbed tools.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
@@ -117,6 +125,12 @@ shareable `.dmg` like the release, run `bash scripts/package-release.sh`.
 Homebrew has a different version the build stops on purpose; review the
 changelog/CVEs and bump the pin, or re-run with
 `ALLOW_GHOSTSCRIPT_VERSION_MISMATCH=1` to bundle anyway (not recommended).
+
+`package-release.sh` also pins the ~20 libraries Ghostscript links against, by
+hash, in `scripts/ghostscript-dependencies.txt`. If Homebrew's copies differ
+the build stops; review their changelogs/CVEs and either regenerate the
+manifest (delete it and re-run) or re-run with
+`ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1` to bundle anyway (not recommended).
 
 > Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
 > Developer Program membership ($99/yr) to notarize the app. The project is
@@ -146,9 +160,12 @@ Git hooks live in `githooks/` and are opt-in per clone — activate them once:
 git config core.hooksPath githooks
 ```
 
-`pre-commit` runs `shellcheck` on staged `scripts/*.sh` (plus SwiftLint on
-staged Swift, once a `.swiftlint.yml` exists); `pre-push` runs
-`bash scripts/build.sh` so a broken build never reaches the remote. Needs
+`pre-commit` runs `shellcheck` on staged `scripts/**/*.sh` (subdirectories
+included) and on the hooks themselves, plus SwiftLint (against the committed
+`.swiftlint.yml` baseline) on staged Swift sources; `pre-push` runs
+`bash scripts/build.sh` and then `xcodebuild test` in the same Release
+configuration, so neither a broken build nor a failing test reaches the
+remote. Needs
 `brew install shellcheck swiftlint`. Prefix a single command with
 `SKIP_HOOKS=1` to bypass them in an emergency.
 
@@ -161,8 +178,10 @@ staged Swift, once a `.swiftlint.yml` exists); `pre-push` runs
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
-| `Tests` | XCTest unit tests for `Sources/Shared` (`EPSPreviewTests` target) |
+| `Tests` | XCTest unit tests for `Sources/Shared` plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
+| `githooks/` | Opt-in local pre-commit / pre-push hooks |
+| `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |
 | `project.yml` | XcodeGen project definition |
 
 The `.xcodeproj` is generated from `project.yml` by `scripts/build.sh` and is

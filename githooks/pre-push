@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pre-push gate: the full build must pass before anything leaves this machine.
+# Pre-push gate: the full build and the test suite must pass before anything
+# leaves this machine.
 #
 # Slow on purpose. scripts/build.sh is the only thing in this repo that
 # asserts the ad-hoc signature graph still holds, and a broken graph means
@@ -13,6 +14,14 @@
 #   SKIP_HOOKS=1 git push …
 set -euo pipefail
 
+# Git feeds one "<local-ref> <local-sha> <remote-ref> <remote-sha>" line per
+# pushed ref on stdin. Nothing here needs them, but they have to be read:
+# a push of many refs at once (`git push --all`, a tag or mirror push) can
+# exceed the pipe buffer, and git's write then blocks or takes a SIGPIPE
+# against a hook that already exited — a spurious push failure that has
+# nothing to do with the build.
+cat >/dev/null
+
 if [ "${SKIP_HOOKS:-0}" != "0" ]; then
   echo "pre-push: skipped (SKIP_HOOKS=${SKIP_HOOKS})"
   exit 0
@@ -24,5 +33,22 @@ cd "$ROOT"
 echo "── pre-push: bash scripts/build.sh ──"
 bash scripts/build.sh
 
+# scripts/build.sh only *builds* the EPSPreview scheme, and EPSPreviewTests is
+# scheme-listed for testing only — so a test file that does not even compile
+# would sail past the build. The flags below are scripts/build.sh's own
+# (Release into the same -derivedDataPath), so this reuses that build instead
+# of triggering a second one in a different configuration.
 echo
-echo "✓ pre-push: build clean"
+echo "── pre-push: xcodebuild test ──"
+xcodebuild \
+  -project EPSPreview.xcodeproj \
+  -scheme EPSPreview \
+  -configuration Release \
+  -derivedDataPath build \
+  CODE_SIGN_IDENTITY="-" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_STYLE=Manual \
+  test
+
+echo
+echo "✓ pre-push: build clean, tests green"

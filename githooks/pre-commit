@@ -27,7 +27,7 @@ staged() {
 shell_files=()
 while IFS= read -r -d '' f; do
   shell_files+=("$f")
-done < <(staged 'scripts/*.sh' githooks/pre-commit githooks/pre-push)
+done < <(staged ':(glob)scripts/**/*.sh' githooks/pre-commit githooks/pre-push)
 
 swift_files=()
 while IFS= read -r -d '' f; do

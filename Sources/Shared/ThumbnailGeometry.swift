@@ -21,18 +21,23 @@ import CoreGraphics
 /// sub-point media boxes) would otherwise fit to nothing.
 ///
 /// `pageSize` must have positive width and height — callers reject empty pages
-/// before asking for a layout.
-func thumbnailLayout(pageSize: CGSize,
-                     maximumSize: CGSize,
-                     minimumSize: CGSize) -> (contextSize: CGSize, pageRect: CGRect) {
-    let fit = min(maximumSize.width / pageSize.width, maximumSize.height / pageSize.height)
-    let fitted = CGSize(width: max(pageSize.width * fit, 1),
-                        height: max(pageSize.height * fit, 1))
-    let contextSize = CGSize(width: max(fitted.width, minimumSize.width),
-                             height: max(fitted.height, minimumSize.height))
-    let pageRect = CGRect(x: (contextSize.width - fitted.width) / 2,
-                          y: (contextSize.height - fitted.height) / 2,
-                          width: fitted.width,
-                          height: fitted.height)
-    return (contextSize, pageRect)
+/// before asking for a layout. `maximumSize` must be positive on both axes for
+/// the same reason: a zero on either axis makes the fit scale zero, so both
+/// sides hit the one-point clamp and the aspect ratio is lost. (`minimumSize`
+/// may be zero — that simply asks for no padding.)
+enum ThumbnailGeometry {
+    static func layout(pageSize: CGSize,
+                       maximumSize: CGSize,
+                       minimumSize: CGSize) -> (contextSize: CGSize, pageRect: CGRect) {
+        let fit = min(maximumSize.width / pageSize.width, maximumSize.height / pageSize.height)
+        let fitted = CGSize(width: max(pageSize.width * fit, 1),
+                            height: max(pageSize.height * fit, 1))
+        let contextSize = CGSize(width: max(fitted.width, minimumSize.width),
+                                 height: max(fitted.height, minimumSize.height))
+        let pageRect = CGRect(x: (contextSize.width - fitted.width) / 2,
+                              y: (contextSize.height - fitted.height) / 2,
+                              width: fitted.width,
+                              height: fitted.height)
+        return (contextSize, pageRect)
+    }
 }

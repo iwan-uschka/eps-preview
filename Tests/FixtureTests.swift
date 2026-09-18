@@ -32,9 +32,22 @@ final class FixtureTests: XCTestCase {
         XCTAssertFalse(declines.contains("/Interpolate true"))
     }
 
+    func testInterpolationIntentIsReadFromTheSource() throws {
+        XCTAssertTrue(RenderClient.wantsInterpolation(try fixture("interpolate-true.eps")))
+        XCTAssertFalse(RenderClient.wantsInterpolation(try fixture("interpolate-false.eps")))
+        XCTAssertFalse(RenderClient.wantsInterpolation(try fixture("minimal-ascii.eps")))
+    }
+
     func testBinaryDOSFixtureHasAWellFormedPreviewHeader() throws {
         let data = try fixture("binary-dos-eps-with-preview.eps")
-        XCTAssertGreaterThan(data.count, 30)
+        // Every bounds-dependent read below is gated on a `guard`, not a plain
+        // assertion: a truncated fixture has to report a readable failure
+        // instead of trapping on an out-of-range subscript and taking the rest
+        // of the test process down with it.
+        guard data.count > 30 else {
+            XCTFail("fixture too short: \(data.count) bytes")
+            return
+        }
         XCTAssertEqual(Array(data.prefix(4)), [0xC5, 0xD0, 0xD3, 0xC6])
 
         func word(at offset: Int) -> Int {
@@ -44,8 +57,13 @@ final class FixtureTests: XCTestCase {
         let tiffOffset = word(at: 20), tiffLength = word(at: 24)
 
         XCTAssertEqual(psOffset, 30)
-        XCTAssertEqual(tiffOffset, psOffset + psLength)
-        XCTAssertEqual(data.count, tiffOffset + tiffLength)
+        guard tiffOffset == psOffset + psLength,
+              data.count == tiffOffset + tiffLength,
+              tiffLength >= 4 else {
+            XCTFail("inconsistent header offsets/lengths: ps \(psOffset)+\(psLength), "
+                    + "tiff \(tiffOffset)+\(tiffLength), file \(data.count) bytes")
+            return
+        }
 
         let start = data.startIndex + psOffset
         let ps = try latin1(data[start..<(start + psLength)])
