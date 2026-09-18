@@ -103,6 +103,21 @@ final class ThumbnailDrawingTests: XCTestCase {
     private let contextSize = CGSize(width: 100, height: 180)
     private let pageRect = CGRect(x: 20, y: 30, width: 60, height: 120)
 
+    // MARK: - Interpolation probe
+
+    /// A page that records the destination context's `interpolationQuality`
+    /// at the moment it is asked to draw itself, instead of drawing anything.
+    /// `interpolationQuality` is scoped to the `saveGState`/`restoreGState`
+    /// pair in `ThumbnailDrawing.draw` and is restored by the time `draw()`
+    /// returns, so this is the only way to observe what it was set to.
+    private final class InterpolationProbePage: PDFPage {
+        private(set) var observedInterpolationQuality: CGInterpolationQuality?
+
+        override func draw(with box: PDFDisplayBox, to context: CGContext) {
+            observedInterpolationQuality = context.interpolationQuality
+        }
+    }
+
     // MARK: - Tests
 
     func testMarkersLandWhereTheLayoutPutsThemAtRetinaScale() throws {
@@ -172,5 +187,79 @@ final class ThumbnailDrawingTests: XCTestCase {
         try assertPixel(context, x: 74, y: 144, is: Marker.topRight, "page's top-right corner")
         try assertPixel(context, x: context.width - 1, y: context.height - 1, is: Marker.white,
                         "top-right of the canvas")
+    }
+
+    func testInterpolationQualityFollowsTheInterpolateFlag() throws {
+        let scale: CGFloat = 2
+
+        let highQualityPage = InterpolationProbePage()
+        ThumbnailDrawing.draw(page: highQualityPage,
+                              pageSize: Self.markerPageSize,
+                              contextSize: contextSize,
+                              pageRect: pageRect,
+                              scale: scale,
+                              interpolate: true,
+                              into: try bitmap(contextSize: contextSize, scale: scale))
+        XCTAssertEqual(highQualityPage.observedInterpolationQuality, .high,
+                       "interpolate: true should set high-quality interpolation before drawing the page")
+
+        let noInterpolationPage = InterpolationProbePage()
+        ThumbnailDrawing.draw(page: noInterpolationPage,
+                              pageSize: Self.markerPageSize,
+                              contextSize: contextSize,
+                              pageRect: pageRect,
+                              scale: scale,
+                              interpolate: false,
+                              into: try bitmap(contextSize: contextSize, scale: scale))
+        XCTAssertEqual(noInterpolationPage.observedInterpolationQuality, CGInterpolationQuality.none,
+                       "interpolate: false should set no interpolation before drawing the page")
+    }
+
+    func testFractionalContextSizeIsNotOffByOnePixel() throws {
+        // A pageSize/maximumSize ratio that doesn't divide evenly forces
+        // contextSize and pageRect off whole points — the input shape most
+        // likely to reproduce a future off-by-one pixel regression from
+        // Int() truncation in bitmap(contextSize:scale:).
+        let pageSize = Self.markerPageSize
+        let maximumSize = CGSize(width: pageSize.width / 3, height: pageSize.height)
+        let (fractionalContextSize, fractionalPageRect) = ThumbnailGeometry.layout(
+            pageSize: pageSize, maximumSize: maximumSize, minimumSize: .zero)
+        XCTAssertNotEqual(fractionalContextSize.width, fractionalContextSize.width.rounded(),
+                          "fixture must actually be fractional, or this test proves nothing")
+
+        let scale: CGFloat = 2
+        let context = try bitmap(contextSize: fractionalContextSize, scale: scale)
+        ThumbnailDrawing.draw(page: try markerPage(),
+                              pageSize: pageSize,
+                              contextSize: fractionalContextSize,
+                              pageRect: fractionalPageRect,
+                              scale: scale,
+                              interpolate: false,
+                              into: context)
+
+        // Sample the middle of each 20×20 marker, mapped through the same
+        // fractional page → context → pixel transform draw() applies, so a
+        // one-pixel truncation still lands inside the right-colored region.
+        let scaleX = fractionalPageRect.width / pageSize.width
+        let scaleY = fractionalPageRect.height / pageSize.height
+        func pixel(pageX: CGFloat, pageY: CGFloat) -> (x: Int, y: Int) {
+            let x = fractionalPageRect.origin.x + pageX * scaleX
+            let y = fractionalPageRect.origin.y + pageY * scaleY
+            return (Int((x * scale).rounded()), Int((y * scale).rounded()))
+        }
+
+        let bottomLeft = pixel(pageX: 10, pageY: 10)
+        let bottomRight = pixel(pageX: 90, pageY: 10)
+        let topLeft = pixel(pageX: 10, pageY: 190)
+        let topRight = pixel(pageX: 90, pageY: 190)
+
+        try assertPixel(context, x: bottomLeft.x, y: bottomLeft.y, is: Marker.bottomLeft,
+                        "fractional geometry — bottom-left corner")
+        try assertPixel(context, x: bottomRight.x, y: bottomRight.y, is: Marker.bottomRight,
+                        "fractional geometry — bottom-right corner")
+        try assertPixel(context, x: topLeft.x, y: topLeft.y, is: Marker.topLeft,
+                        "fractional geometry — top-left corner")
+        try assertPixel(context, x: topRight.x, y: topRight.y, is: Marker.topRight,
+                        "fractional geometry — top-right corner")
     }
 }

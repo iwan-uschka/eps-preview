@@ -58,6 +58,8 @@ echo "── Refreshing Finder thumbnails ──"
 # to one — restarting Finder alone isn't enough to make it drop that and
 # reconnect to the copy just installed above.
 qlmanage -r cache >/dev/null 2>&1 || true
+killall quicklookd >/dev/null 2>&1 || true
+killall thumbnailservicesagent >/dev/null 2>&1 || true
 killall com.apple.quicklook.ThumbnailsAgent >/dev/null 2>&1 || true
 killall Finder >/dev/null 2>&1 || true
 

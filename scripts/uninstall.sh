@@ -12,5 +12,6 @@ pluginkit -r "$DEST/Contents/PlugIns/EPSThumbnail.appex" >/dev/null 2>&1 || true
 rm -rf "$DEST"
 rm -rf "$HOME/Library/Containers/com.zhangyanbo.EPSPreview"* 2>/dev/null || true
 
+killall com.apple.quicklook.ThumbnailsAgent >/dev/null 2>&1 || true
 killall Finder >/dev/null 2>&1 || true
 echo "✓ EPS Preview uninstalled."

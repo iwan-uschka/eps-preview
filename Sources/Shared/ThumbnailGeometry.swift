@@ -13,10 +13,11 @@ import CoreGraphics
 /// the context exactly, at the origin.
 ///
 /// Sizes are in points, not device pixels: `QLThumbnailReply(contextSize:)`
-/// multiplies the *pixel* dimensions of the bitmap it creates by the request's
-/// `scale`, so the size handed to it must not be pre-scaled. It does not scale
-/// that bitmap's transform to match, though — putting the request's `scale`
-/// back into the coordinate system is `ThumbnailDrawing`'s job, not this one's.
+/// multiplies the point-based size handed to it by the request's `scale` to
+/// get the *pixel* dimensions of the bitmap it creates, so the size handed to
+/// it must not be pre-scaled. It does not scale that bitmap's transform to
+/// match, though — putting the request's `scale` back into the coordinate
+/// system is `ThumbnailDrawing`'s job, not this one's.
 ///
 /// Both axes are clamped to at least one point: `CGContext` refuses a
 /// zero-sized bitmap, and a page thinner than a point (extreme aspect ratios,

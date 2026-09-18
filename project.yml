@@ -128,8 +128,8 @@ targets:
   # ──────────────────────────────────────────────────────────────────────
   # Unit tests for the shared code (Ghostscript resolution cache and version
   # floor, admission counter, render-outcome rules, page geometry and preview
-  # paging) plus fixture-backed coverage for BundleLayout and thumbnail
-  # geometry.
+  # paging) plus fixture-backed coverage for BundleLayout, thumbnail geometry
+  # and thumbnail drawing (the Retina scale / transform chain).
   #
   # It compiles Sources/Shared itself rather than depending on one of the app
   # targets: everything under test lives there, and a dependency on EPSPreview
