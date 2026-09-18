@@ -90,31 +90,65 @@ Requirements: Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 ```bash
 git clone https://github.com/Zhangyanbo/eps-preview.git
 cd eps-preview
-bash scripts/build.sh      # builds + ad-hoc signs (no Apple Developer account needed)
-bash scripts/install.sh    # installs to /Applications, registers
+bash scripts/make_build.sh      # build + ad-hoc sign
+bash scripts/make_test.sh       # full test suite
+bash scripts/make_install.sh    # build, install to /Applications, register extensions
 ```
 
-Tests:
+`scripts/make_uninstall.sh` reverses `make_install.sh`. **Never run
+`make_install.sh` / `make_uninstall.sh` (or the `scripts/install.sh` /
+`scripts/uninstall.sh` they wrap) with `sudo`** — both refuse outright and
+exit 1 if you do. `install.sh` calls `lsregister` and `open`, which are
+per-user; running as root registers the extensions into *root's*
+LaunchServices database, invisible to your actual login session, which
+silently breaks Finder's thumbnails even though the install "succeeds". If a
+past `sudo` run already left a root-owned `/Applications/EPSPreview.app`
+behind, clear it once with `sudo rm -rf /Applications/EPSPreview.app` before
+running `make_install.sh` again — that one-time cleanup step is the only
+place `sudo` belongs in this workflow.
+
+Each `make_*.sh` is a thin wrapper — for finer control, or to run one piece
+in isolation, the commands underneath are:
 
 ```bash
-xcodegen generate                                # if you haven't built yet
+xcodegen generate                                # regenerate EPSPreview.xcodeproj from project.yml
+bash scripts/build.sh                             # builds + ad-hoc signs (no Apple Developer account needed)
+bash scripts/install.sh                           # installs to /Applications, registers extensions
+bash scripts/uninstall.sh                         # removes it, unregisters extensions
 xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit tests
 bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
 bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
 bash scripts/test-githooks.sh                    # the git hooks' own logic
+bash scripts/test-make-scripts.sh                # the make_*.sh sudo guard itself
 ```
+
+`xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
+directly) — the scheme deliberately excludes the host app and both extensions
+from the `test` action. Building them there used to leave a full
+`EPSPreview.app` with embedded Quick Look/Thumbnail extensions sitting in
+DerivedData after every test run, and macOS's LaunchServices auto-registers
+any such app it finds on disk — so every test run silently registered a stray
+duplicate of the real `/Applications` install, alongside whatever other
+build-tree copies (other worktrees, ad-hoc builds) happened to exist. If you
+ever see EPS Preview listed more than once under System Settings → General →
+Login Items & Extensions → Quick Look, find and drop the stale copies with
+`lsregister -dump` / `lsregister -u <path-to-stale-EPSPreview.app>`
+(`lsregister` is
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`).
 
 The `EPSPreviewTests` target covers `Sources/Shared` — the Ghostscript
 resolution cache and version floor, the admission counter, the render-outcome
 rules, the app-bundle layout helper, the thumbnail geometry and the page
 geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
 inputs, which are checked for structural integrity so a truncated fixture fails
-loudly. The three plain-bash suites (no dependencies) cover the shell side:
+loudly. The plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
-against fake manifests, and `scripts/test-githooks.sh` pins the pre-commit and
-pre-push hooks against throwaway repos and stubbed tools.
+against fake manifests, `scripts/test-githooks.sh` pins the pre-commit and
+pre-push hooks against throwaway repos and stubbed tools, and
+`scripts/test-make-scripts.sh` pins `make_install.sh`/`make_uninstall.sh`'s
+refusal to run as root.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
