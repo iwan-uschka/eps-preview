@@ -30,26 +30,24 @@ final class ThumbnailProvider: QLThumbnailProvider {
                                          minimumSize: request.minimumSize)
             let pageRect = layout.pageRect
 
+            let scale = request.scale
+
             handler(QLThumbnailReply(contextSize: layout.contextSize) { context in
                 // The block runs after this method returns and PDFPage refers
                 // to its document weakly, so the document — not just the page —
                 // has to be captured to keep the page drawable.
                 guard let page = document.page(at: 0) else { return false }
 
-                // White background over the whole canvas, not just the fitted
-                // page: ThumbnailGeometry.layout pads the context out to the
-                // requested minimum, and that letterbox margin would
-                // otherwise stay transparent (documents render on white).
-                context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-                context.fill(CGRect(origin: .zero, size: layout.contextSize))
-
-                // Honor the source's interpolation intent (see RenderClient).
-                context.interpolationQuality = interpolate ? .high : .none
-
-                context.translateBy(x: pageRect.origin.x, y: pageRect.origin.y)
-                context.scaleBy(x: pageRect.width / pageSize.width,
-                                y: pageRect.height / pageSize.height)
-                page.draw(with: PDFPageGeometry.displayBox, to: context)
+                // Every bit of the transform chain lives in ThumbnailDrawing,
+                // which is where it can be unit-tested against a hand-built
+                // bitmap context.
+                ThumbnailDrawing.draw(page: page,
+                                      pageSize: pageSize,
+                                      contextSize: layout.contextSize,
+                                      pageRect: pageRect,
+                                      scale: scale,
+                                      interpolate: interpolate,
+                                      into: context)
                 return true
             }, nil)
         }

@@ -53,7 +53,12 @@ sleep 3
 echo "── Refreshing Finder thumbnails ──"
 # Reset only the thumbnail cache (NOT `qlmanage -r`, which de-registers
 # third-party extensions) and restart Finder so EPS icons re-render.
+# ThumbnailsAgent (the broker Finder actually asks) can keep a warm
+# connection to whatever EPSThumbnail process was alive when it last talked
+# to one — restarting Finder alone isn't enough to make it drop that and
+# reconnect to the copy just installed above.
 qlmanage -r cache >/dev/null 2>&1 || true
+killall com.apple.quicklook.ThumbnailsAgent >/dev/null 2>&1 || true
 killall Finder >/dev/null 2>&1 || true
 
 echo

@@ -113,10 +113,11 @@ targets:
         # geometry and paging rules out of this target avoids drift between
         # what's compiled here and what's actually used, and keeps the
         # unsandboxed helper's linked frameworks unchanged for the PDFKit
-        # ones (PDFPageGeometry, PreviewPageLayout).
+        # ones (PDFPageGeometry, PreviewPageLayout, ThumbnailDrawing).
         excludes:
           - PDFPageGeometry.swift
           - PreviewPageLayout.swift
+          - ThumbnailDrawing.swift
           - ThumbnailGeometry.swift
     settings:
       base:
