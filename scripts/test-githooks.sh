@@ -57,7 +57,7 @@ stub() {
 # depend on where this machine keeps them.
 BARE="$WORK/bare"
 mkdir -p "$BARE"
-for tool in git dirname xcrun sh env; do
+for tool in git dirname xcrun sh env bash; do
   real="$(command -v "$tool" 2>/dev/null)" || continue
   [ -n "$real" ] && ln -s "$real" "$BARE/$tool"
 done
