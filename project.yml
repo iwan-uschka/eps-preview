@@ -156,14 +156,15 @@ targets:
 schemes:
   EPSPreview:
     build:
-      # The host app and both extensions are excluded from the `test` action
-      # (everything but that: run, profile, analyze, archive) so
-      # `xcodebuild test` only ever builds EPSPreviewTests, which compiles
-      # Sources/Shared directly and needs none of them. Building them for
-      # `test` used to put a full EPSPreview.app with embedded Quick
-      # Look/Thumbnail extensions into DerivedData on every test run — and
-      # macOS's LaunchServices auto-registers any such app it finds on disk,
-      # so every test run silently registered a stray duplicate of the real
+      # The host app, both extensions, and the render XPC service are
+      # excluded from the `test` action (everything but that: run, profile,
+      # analyze, archive) so `xcodebuild test` only ever builds
+      # EPSPreviewTests, which compiles Sources/Shared directly and needs
+      # none of them. Building them for `test` used to put a full
+      # EPSPreview.app with embedded Quick Look/Thumbnail extensions (and
+      # RenderService) into DerivedData on every test run — and macOS's
+      # LaunchServices auto-registers any such app it finds on disk, so
+      # every test run silently registered a stray duplicate of the real
       # /Applications install.
       targets:
         EPSPreview: [run, profile, analyze, archive]

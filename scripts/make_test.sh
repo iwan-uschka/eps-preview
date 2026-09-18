@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Single entry point for the full test suite: Swift unit tests (which only
 # build EPSPreviewTests — see project.yml's scheme comment for why that
-# matters) plus the three plain-bash suites. See README.md's Tests section
-# for what each one covers.
+# matters) plus the plain-bash suites. See README.md's Tests section for
+# what each one covers.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

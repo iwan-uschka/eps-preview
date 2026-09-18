@@ -96,9 +96,11 @@ bash scripts/make_install.sh    # build, install to /Applications, register exte
 ```
 
 `scripts/make_uninstall.sh` reverses `make_install.sh`. **Never run
-`make_install.sh` / `make_uninstall.sh` (or the `scripts/install.sh` /
-`scripts/uninstall.sh` they wrap) with `sudo`** — both refuse outright and
-exit 1 if you do. `install.sh` calls `lsregister` and `open`, which are
+`make_install.sh` / `make_uninstall.sh` with `sudo`** — both refuse outright
+and exit 1 if you do. The guard lives only in the `make_*.sh` wrappers, so if
+you run the underlying `scripts/install.sh` / `scripts/uninstall.sh` directly
+(see below), the same "never with `sudo`" rule applies but nothing will stop
+you from breaking it: `install.sh` calls `lsregister` and `open`, which are
 per-user; running as root registers the extensions into *root's*
 LaunchServices database, invisible to your actual login session, which
 silently breaks Finder's thumbnails even though the install "succeeds". If a
@@ -119,17 +121,18 @@ xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit 
 bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
 bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
 bash scripts/test-githooks.sh                    # the git hooks' own logic
-bash scripts/test-make-scripts.sh                # the make_*.sh sudo guard itself
+bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own logic
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
-directly) — the scheme deliberately excludes the host app and both extensions
-from the `test` action. Building them there used to leave a full
-`EPSPreview.app` with embedded Quick Look/Thumbnail extensions sitting in
-DerivedData after every test run, and macOS's LaunchServices auto-registers
-any such app it finds on disk — so every test run silently registered a stray
-duplicate of the real `/Applications` install, alongside whatever other
-build-tree copies (other worktrees, ad-hoc builds) happened to exist. If you
+directly) — the scheme deliberately excludes the host app, both extensions, and
+the render XPC service from the `test` action. Building them there used to leave
+a full `EPSPreview.app` with embedded Quick Look/Thumbnail extensions (and
+RenderService) sitting in DerivedData after every test run, and macOS's
+LaunchServices auto-registers any such app it finds on disk — so every test run
+silently registered a stray duplicate of the real `/Applications` install,
+alongside whatever other build-tree copies (other worktrees, ad-hoc builds)
+happened to exist. If you
 ever see EPS Preview listed more than once under System Settings → General →
 Login Items & Extensions → Quick Look, find and drop the stale copies with
 `lsregister -dump` / `lsregister -u <path-to-stale-EPSPreview.app>`
@@ -148,7 +151,9 @@ against the service's using fake `gs` binaries,
 against fake manifests, `scripts/test-githooks.sh` pins the pre-commit and
 pre-push hooks against throwaway repos and stubbed tools, and
 `scripts/test-make-scripts.sh` pins `make_install.sh`/`make_uninstall.sh`'s
-refusal to run as root.
+refusal to run as root, their delegation to `build.sh`/`install.sh`/
+`uninstall.sh` otherwise, and `make_test.sh`'s refusal to run without
+`xcodegen` on `PATH`.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
