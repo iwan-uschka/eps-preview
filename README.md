@@ -150,9 +150,11 @@ loudly. The plain-bash suites (no dependencies) cover the shell side:
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
 against fake manifests, `scripts/test-ghostscript-thirdparty.sh` pins the
-formula/version parsing, license-file discovery and NOTICE.md generated-block
-replacement that `bundle-ghostscript.sh` uses to keep NOTICE.md's third-party
-manifest generated from the actual bundled closure instead of hand-maintained,
+formula/version parsing, bundled-file-to-formula attribution, license-file
+discovery, Markdown table rendering and NOTICE.md generated-block
+replacement that `bundle-ghostscript.sh` uses to keep NOTICE.md's
+third-party manifest generated from the actual bundled closure instead of
+hand-maintained,
 `scripts/test-githooks.sh` pins the pre-commit and pre-push hooks against
 throwaway repos and stubbed tools, and `scripts/test-make-scripts.sh` pins
 `make_install.sh`/`make_uninstall.sh`'s refusal to run as root, their
@@ -176,8 +178,9 @@ manifest (delete it and re-run) or re-run with
 `ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1` to bundle anyway (not recommended).
 
 `bundle-ghostscript.sh` also harvests each bundled project's own license file
-out of its Homebrew keg into `licenses/<project>/` in its output directory,
-and regenerates [NOTICE.md](NOTICE.md)'s third-party table from that same
+out of its Homebrew keg into `licenses/<project>/` in its output directory
+(`package-release.sh` ships that tree inside the app, at
+`Contents/Resources/ghostscript/licenses/`), and regenerates [NOTICE.md](NOTICE.md)'s third-party table from that same
 data — so the table can't drift from what a build actually bundles the way a
 hand-maintained one could. Running either script updates `NOTICE.md`
 in place; commit the result.

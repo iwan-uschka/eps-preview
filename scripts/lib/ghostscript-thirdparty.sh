@@ -20,6 +20,9 @@
 #   . "$ROOT/scripts/lib/ghostscript-thirdparty.sh"
 #   formula="$(eps_formula_from_cellar_path "$resolved_path")"
 #   version="$(eps_formula_version_from_cellar_path "$resolved_path")"
+#   path="$(eps_formula_path_from_sources sources.tsv "$formula")"
+#   bundled="$(eps_bundled_basenames_for_keg sources.tsv "$keg_dir")"
+#   meta="$(eps_meta_line_for_formula "$formula" < meta.tsv)"
 #   eps_license_files_in "$keg_dir"
 #   eps_render_thirdparty_table < rows.tsv > table.md
 #   eps_replace_generated_block NOTICE.md "$BEGIN" "$END" table.md
@@ -55,6 +58,35 @@ eps_formula_version_from_cellar_path() {
   local rest="${1#*/Cellar/}"
   rest="${rest#*/}"
   printf '%s\n' "${rest%%/*}"
+}
+
+# eps_formula_path_from_sources <sources-file> <formula>: <sources-file> holds
+# "<bundled-basename><TAB><resolved-source-path>" lines. Prints the first
+# source path that lives inside a Cellar keg of exactly <formula> (a formula
+# whose name merely shares a prefix, e.g. "libpng" vs "libpng12", does not
+# match). Prints nothing if none does.
+eps_formula_path_from_sources() {
+  awk -F'\t' -v f="$2" '
+    { n = split($2, a, "/Cellar/"); if (n == 2) { split(a[2], b, "/"); if (b[1] == f) { print $2; exit } } }
+  ' "$1"
+}
+
+# eps_bundled_basenames_for_keg <sources-file> <keg-dir>: prints, comma-joined
+# on one line in <sources-file> order, the bundled basename of every entry
+# whose source path lies inside <keg-dir> (a sibling keg whose path merely
+# starts with the same characters, e.g. ".../1.0" vs ".../1.0_1", does not
+# match). Prints nothing if none does.
+eps_bundled_basenames_for_keg() {
+  awk -F'\t' -v keg="${2%/}/" '
+    index($2, keg) == 1 { printf "%s%s", (n++ ? "," : ""), $1 }
+  ' "$1"
+}
+
+# eps_meta_line_for_formula <formula>: reads "<name><TAB><license><TAB><homepage>"
+# lines on stdin and prints the first whose name is exactly <formula>, or
+# nothing if none is.
+eps_meta_line_for_formula() {
+  awk -F'\t' -v f="$1" '$1 == f { print; exit }'
 }
 
 # eps_license_files_in <dir>: prints, one per line, the basename of every
@@ -117,19 +149,30 @@ eps_render_thirdparty_table() {
 # exactly matches <begin-marker> and the next line that exactly matches
 # <end-marker> with the contents of <content-file>. Both marker lines are
 # preserved verbatim. Fails loudly, leaving <file> untouched, if either
-# marker is missing — silently skipping the replacement would ship a stale
+# marker is missing, duplicated, or the end marker precedes the begin
+# marker, or if <content-file> is unreadable — silently skipping the replacement would ship a stale
 # table instead of erroring, which is worse than crashing the build.
 eps_replace_generated_block() {
   local file="$1" begin="$2" end="$3" contentfile="$4" tmp
+  [ -r "$contentfile" ] || {
+    echo "error: content file not found or unreadable: $contentfile" >&2; return 1; }
   grep -qxF "$begin" "$file" || {
     echo "error: begin marker not found in $file: $begin" >&2; return 1; }
   grep -qxF "$end" "$file" || {
     echo "error: end marker not found in $file: $end" >&2; return 1; }
+  # A reversed or duplicated marker would leave the awk below skipping every
+  # line through EOF, silently truncating the file instead of failing.
+  awk -v begin="$begin" -v end="$end" '
+    $0 == begin { b++; if (!bl) bl = NR }
+    $0 == end   { e++; if (!el) el = NR }
+    END { exit !(b == 1 && e == 1 && bl < el) }
+  ' "$file" || {
+    echo "error: markers in $file are not a single begin-before-end pair" >&2; return 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/eps-notice.XXXXXX")"
   awk -v begin="$begin" -v end="$end" -v contentfile="$contentfile" '
     $0 == begin { print; while ((getline line < contentfile) > 0) print line; skipping=1; next }
     $0 == end   { skipping=0 }
     skipping    { next }
     { print }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }

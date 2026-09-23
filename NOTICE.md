@@ -25,14 +25,21 @@ actually bundles as dependency versions change. Regenerate it by running
 `bash scripts/bundle-ghostscript.sh <output-dir>` (or `scripts/package-release.sh`,
 which calls it); the full license text for every project below is harvested
 alongside the binaries, into `licenses/<project>/` inside that output
-directory. Homebrew's own formula metadata is the source for the license
-identifiers.
+directory, and release builds ship it inside the app at
+`EPSPreview.app/Contents/Resources/ghostscript/licenses/<project>/` — the
+`licenses/…` paths in the table are relative to that directory. Homebrew's
+own formula metadata is the source for the license identifiers.
 
 <!-- BEGIN GENERATED THIRD-PARTY MANIFEST: written by scripts/bundle-ghostscript.sh, do not hand-edit -->
 | Project | Version | License | Bundled as | License file(s) |
 |---------|---------|---------|------------|------------------|
 | _(run `scripts/bundle-ghostscript.sh` to populate this table)_ | | | | |
 <!-- END GENERATED THIRD-PARTY MANIFEST -->
+
+Until that table is populated by running the script, the bundled Ghostscript
+is known to carry the shared libraries it links against (libfreetype,
+libtiff, libopenjp2, libidn, libintl, libtesseract and others), each under
+its own license (FTL/GPLv2, LGPL, Apache-2.0, BSD and similar).
 
 When you **build from source** (`scripts/build.sh`) instead of using a
 release, Ghostscript is **not** bundled — the app calls the copy you install

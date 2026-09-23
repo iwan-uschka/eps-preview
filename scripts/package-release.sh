@@ -32,6 +32,9 @@ cp -R "$GSTMP/share/." "$APP/Contents/Resources/ghostscript/"
 # Carry the provenance record (gs version + binary hashes) into the shipped
 # app, before the re-seal below so it is covered by the signature.
 cp -f "$GSTMP/GHOSTSCRIPT_PROVENANCE.txt" "$APP/Contents/Resources/ghostscript/GHOSTSCRIPT_PROVENANCE.txt"
+# Carry each bundled project's own license text alongside it, before the
+# re-seal, so the shipped app discharges their redistribution obligations.
+cp -R "$GSTMP/licenses" "$APP/Contents/Resources/ghostscript/licenses"
 rm -rf "$(dirname "$GSTMP")"
 
 echo

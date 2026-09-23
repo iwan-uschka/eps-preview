@@ -37,6 +37,10 @@ NOTICE_END_MARKER="<!-- END GENERATED THIRD-PARTY MANIFEST -->"
 . "$ROOT/scripts/lib/ghostscript-thirdparty.sh"
 
 OUT="${1:?usage: bundle-ghostscript.sh <output-dir>}"
+# Cleaned up from a trap, not just the success-path `rm -f` calls below, so an
+# aborted run (a Cellar-attribution or version error, a missing license file)
+# doesn't leave .harvest-* scratch files sitting in $OUT.
+trap 'rm -f "$OUT"/.harvest-*' EXIT INT TERM
 
 command -v brew >/dev/null 2>&1 || { echo "error: Homebrew is required to source Ghostscript."; exit 1; }
 if ! brew list ghostscript >/dev/null 2>&1; then
@@ -88,10 +92,10 @@ echo "→ collecting dependent libraries…"
 # "<bundled-basename><TAB><fully-resolved-source-path>" per bundled Mach-O,
 # converter included — the license harvest below walks this to find which
 # Homebrew formula (and which keg on disk) each bundled file came from. A
-# plain file, appended to from inside the loop below (which runs under
-# process substitution, possibly a subshell): a shell *variable* mutated
-# there would not necessarily survive back out to this scope, but a file
-# append does regardless. Recorded while $src is still the exact file that
+# plain file, appended to from inside the loop below, so the recorded source
+# path survives across every pass of the outer fixed-point loop without
+# needing to be threaded through as a variable. Recorded while $src is still
+# the exact file that
 # got copied, rather than re-derived later from $OUT/lib/*.dylib: by then a
 # same-named library from a different, unrelated formula could in principle
 # occupy that path.
@@ -246,32 +250,30 @@ ROWS_FILE="$OUT/.harvest-rows"
 : > "$ROWS_FILE"
 while IFS= read -r formula; do
   [ -n "$formula" ] || continue
-  formula_path="$(awk -F'\t' -v f="$formula" '
-    { n = split($2, a, "/Cellar/"); if (n == 2) { split(a[2], b, "/"); if (b[1] == f) { print $2; exit } } }
-  ' "$SOURCES_FILE")"
+  formula_path="$(eps_formula_path_from_sources "$SOURCES_FILE" "$formula")"
   version="$(eps_formula_version_from_cellar_path "$formula_path")"
   [ -n "$version" ] || { echo "error: could not determine the installed version of $formula."; exit 1; }
   keg="$PREFIX/Cellar/$formula/$version"
 
-  bundled="$(awk -F'\t' -v keg="$keg/" '
-    index($2, keg) == 1 { printf "%s%s", (n++ ? "," : ""), $1 }
-  ' "$SOURCES_FILE")"
+  bundled="$(eps_bundled_basenames_for_keg "$SOURCES_FILE" "$keg")"
 
-  licensefiles="$(eps_license_files_in "$keg" | LC_ALL=C sort | paste -s -d ',' -)"
+  licensefiles_list="$(eps_license_files_in "$keg")"
+  licensefiles="$(printf '%s\n' "$licensefiles_list" | LC_ALL=C sort | paste -s -d ',' -)"
   if [ -n "$licensefiles" ]; then
     mkdir -p "$OUT/licenses/$formula"
     while IFS= read -r lf; do
       [ -n "$lf" ] || continue
       cp -f "$keg/$lf" "$OUT/licenses/$formula/$lf"
-    done < <(eps_license_files_in "$keg")
+    done <<< "$licensefiles_list"
   else
     echo "warning: no license file found in $keg for $formula — NOTICE.md will list it with none."
   fi
 
-  meta_line="$(printf '%s\n' "$THIRDPARTY_META" | awk -F'\t' -v f="$formula" '$1 == f { print; exit }')"
+  meta_line="$(printf '%s\n' "$THIRDPARTY_META" | eps_meta_line_for_formula "$formula")"
   license="$(printf '%s' "$meta_line" | cut -f2)"
   homepage="$(printf '%s' "$meta_line" | cut -f3)"
   [ -n "$license" ] || license="unknown"
+  [ -n "$homepage" ] || homepage="unknown"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$formula" "$version" "$license" "$homepage" "$bundled" "$licensefiles" >> "$ROWS_FILE"
@@ -304,8 +306,10 @@ fi
 PROBE="$(mktemp -d)"
 # Cleaned up from a trap, not just on the success path: the probe-render check
 # below exits 1, and a script that leaks a temp directory on every failed run
-# litters $TMPDIR while it is being worked on.
-trap 'rm -rf "$PROBE"' EXIT INT TERM
+# litters $TMPDIR while it is being worked on. Combined with the .harvest-*
+# cleanup registered above, since a later trap on the same signal replaces
+# rather than stacks with an earlier one.
+trap 'rm -rf "$PROBE"; rm -f "$OUT"/.harvest-*' EXIT INT TERM
 cat > "$PROBE/probe.eps" <<'EOF'
 %!PS-Adobe-3.0 EPSF-3.0
 %%BoundingBox: 0 0 8 8
