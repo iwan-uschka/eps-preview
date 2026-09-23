@@ -120,6 +120,7 @@ bash scripts/uninstall.sh                         # removes it, unregisters exte
 xcodebuild test -scheme EPSPreview -project EPSPreview.xcodeproj   # Swift unit tests
 bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
 bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
+bash scripts/test-ghostscript-thirdparty.sh      # third-party license manifest generation
 bash scripts/test-githooks.sh                    # the git hooks' own logic
 bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own logic
 ```
@@ -148,12 +149,15 @@ loudly. The plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
-against fake manifests, `scripts/test-githooks.sh` pins the pre-commit and
-pre-push hooks against throwaway repos and stubbed tools, and
-`scripts/test-make-scripts.sh` pins `make_install.sh`/`make_uninstall.sh`'s
-refusal to run as root, their delegation to `build.sh`/`install.sh`/
-`uninstall.sh` otherwise, and `make_test.sh`'s refusal to run without
-`xcodegen` on `PATH`.
+against fake manifests, `scripts/test-ghostscript-thirdparty.sh` pins the
+formula/version parsing, license-file discovery and NOTICE.md generated-block
+replacement that `bundle-ghostscript.sh` uses to keep NOTICE.md's third-party
+manifest generated from the actual bundled closure instead of hand-maintained,
+`scripts/test-githooks.sh` pins the pre-commit and pre-push hooks against
+throwaway repos and stubbed tools, and `scripts/test-make-scripts.sh` pins
+`make_install.sh`/`make_uninstall.sh`'s refusal to run as root, their
+delegation to `build.sh`/`install.sh`/`uninstall.sh` otherwise, and
+`make_test.sh`'s refusal to run without `xcodegen` on `PATH`.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
@@ -170,6 +174,13 @@ hash, in `scripts/ghostscript-dependencies.txt`. If Homebrew's copies differ
 the build stops; review their changelogs/CVEs and either regenerate the
 manifest (delete it and re-run) or re-run with
 `ALLOW_DEPENDENCY_MANIFEST_MISMATCH=1` to bundle anyway (not recommended).
+
+`bundle-ghostscript.sh` also harvests each bundled project's own license file
+out of its Homebrew keg into `licenses/<project>/` in its output directory,
+and regenerates [NOTICE.md](NOTICE.md)'s third-party table from that same
+data — so the table can't drift from what a build actually bundles the way a
+hand-maintained one could. Running either script updates `NOTICE.md`
+in place; commit the result.
 
 > Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
 > Developer Program membership ($99/yr) to notarize the app. The project is
