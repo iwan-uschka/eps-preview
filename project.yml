@@ -147,6 +147,10 @@ targets:
       - path: Tests/Fixtures
         type: folder
       - path: Sources/Shared
+      # Not the whole RenderService target (that would drag in main.swift's
+      # top-level executable statements, which Swift forbids linking into a
+      # test target) -- just the one file PeerTrustTests exercises.
+      - path: Sources/RenderService/PeerTrust.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.Tests

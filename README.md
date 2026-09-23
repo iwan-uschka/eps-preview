@@ -144,7 +144,13 @@ resolution cache and version floor, the admission counter, the render-outcome
 rules, the app-bundle layout helper, the thumbnail geometry and the page
 geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
 inputs, which are checked for structural integrity so a truncated fixture fails
-loudly. The plain-bash suites (no dependencies) cover the shell side:
+loudly. It also covers `RenderService`'s XPC peer-trust decision
+(`Sources/RenderService/PeerTrust.swift`, pulled in as a single extra file so
+its top-level-statement-free logic can link into a test target):
+`PeerTrustTests` spawns a second, genuinely running, separately ad-hoc signed
+process outside the fixture app-bundle root and asserts it is refused, the
+negative counterpart to the same check accepting a peer inside that root. The
+plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
