@@ -129,13 +129,16 @@ targets:
   # Unit tests for the shared code (Ghostscript resolution cache and version
   # floor, admission counter, render-outcome rules, page geometry and preview
   # paging) plus fixture-backed coverage for BundleLayout, thumbnail geometry
-  # and thumbnail drawing (the Retina scale / transform chain).
+  # and thumbnail drawing (the Retina scale / transform chain), and
+  # RenderService's XPC peer-trust decision (PeerTrust.swift, compiled in as
+  # a single file).
   #
-  # It compiles Sources/Shared itself rather than depending on one of the app
-  # targets: everything under test lives there, and a dependency on EPSPreview
-  # would drag the host app's Info.plist / entitlements / signing into a plain
-  # library test bundle. This is the one target that may have a generated
-  # Info.plist — there is no hand-written one to protect.
+  # It compiles Sources/Shared (and that one RenderService file) itself
+  # rather than depending on one of the app targets: everything else under
+  # test lives there, and a dependency on EPSPreview would drag the host
+  # app's Info.plist / entitlements / signing into a plain library test
+  # bundle. This is the one target that may have a generated Info.plist —
+  # there is no hand-written one to protect.
   # ──────────────────────────────────────────────────────────────────────
   EPSPreviewTests:
     type: bundle.unit-test
@@ -163,8 +166,9 @@ schemes:
       # The host app, both extensions, and the render XPC service are
       # excluded from the `test` action (everything but that: run, profile,
       # analyze, archive) so `xcodebuild test` only ever builds
-      # EPSPreviewTests, which compiles Sources/Shared directly and needs
-      # none of them. Building them for `test` used to put a full
+      # EPSPreviewTests, which compiles Sources/Shared (plus one
+      # RenderService file, PeerTrust.swift) directly and needs none of
+      # them. Building them for `test` used to put a full
       # EPSPreview.app with embedded Quick Look/Thumbnail extensions (and
       # RenderService) into DerivedData on every test run — and macOS's
       # LaunchServices auto-registers any such app it finds on disk, so

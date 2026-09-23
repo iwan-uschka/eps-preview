@@ -125,8 +125,9 @@ bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own l
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
-directly) — the scheme deliberately excludes the host app, both extensions, and
-the render XPC service from the `test` action. Building them there used to leave
+plus `Sources/RenderService/PeerTrust.swift` directly) — the scheme deliberately
+excludes the host app, both extensions, and the render XPC service from the
+`test` action. Building them there used to leave
 a full `EPSPreview.app` with embedded Quick Look/Thumbnail extensions (and
 RenderService) sitting in DerivedData after every test run, and macOS's
 LaunchServices auto-registers any such app it finds on disk — so every test run
@@ -223,7 +224,7 @@ remote. Needs
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
-| `Tests` | XCTest unit tests for `Sources/Shared` plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
+| `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |
 | `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |

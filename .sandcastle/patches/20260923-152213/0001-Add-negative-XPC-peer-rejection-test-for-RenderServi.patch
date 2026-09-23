@@ -1,0 +1,282 @@
+From e0f716008ee794a521b9b80d9839ef4f7d255dbf Mon Sep 17 00:00:00 2001
+From: iwan-uschka <iwan@creativytool.com>
+Date: Wed, 23 Sep 2026 13:22:07 +0000
+Subject: [PATCH] Add negative XPC peer-rejection test for RenderService
+
+Extracts the peer-trust check out of main.swift (which has top-level
+executable statements and can't link into a test target) into
+PeerTrust.swift, and adds PeerTrustTests: a real, separately ad-hoc
+signed process spawned outside the fixture app-bundle root and
+asserted to be refused, alongside the positive case of a peer inside
+the root. Closes #11.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ README.md                             |  8 ++-
+ Sources/RenderService/PeerTrust.swift | 53 ++++++++++++++++
+ Sources/RenderService/main.swift      | 44 +------------
+ Tests/PeerTrustTests.swift            | 89 +++++++++++++++++++++++++++
+ project.yml                           |  4 ++
+ 5 files changed, 154 insertions(+), 44 deletions(-)
+ create mode 100644 Sources/RenderService/PeerTrust.swift
+ create mode 100644 Tests/PeerTrustTests.swift
+
+diff --git a/README.md b/README.md
+index 01614a3..4d22bd7 100644
+--- a/README.md
++++ b/README.md
+@@ -144,7 +144,13 @@ resolution cache and version floor, the admission counter, the render-outcome
+ rules, the app-bundle layout helper, the thumbnail geometry and the page
+ geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
+ inputs, which are checked for structural integrity so a truncated fixture fails
+-loudly. The plain-bash suites (no dependencies) cover the shell side:
++loudly. It also covers `RenderService`'s XPC peer-trust decision
++(`Sources/RenderService/PeerTrust.swift`, pulled in as a single extra file so
++its top-level-statement-free logic can link into a test target):
++`PeerTrustTests` spawns a second, genuinely running, separately ad-hoc signed
++process outside the fixture app-bundle root and asserts it is refused, the
++negative counterpart to the same check accepting a peer inside that root. The
++plain-bash suites (no dependencies) cover the shell side:
+ `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
+ against the service's using fake `gs` binaries,
+ `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
+diff --git a/Sources/RenderService/PeerTrust.swift b/Sources/RenderService/PeerTrust.swift
+new file mode 100644
+index 0000000..09ea9ee
+--- /dev/null
++++ b/Sources/RenderService/PeerTrust.swift
+@@ -0,0 +1,53 @@
++import Foundation
++import Security
++
++/// Decides which processes are allowed to drive a render.
++///
++/// Extracted out of `main.swift` (which has top-level executable statements
++/// and so can never be linked into a test target) so this decision is
++/// reachable by `PeerTrustTests`, which spawns a real, separately ad-hoc
++/// signed second process and asserts it is refused. Behavior is unchanged
++/// from the check this replaces: containment within the same on-disk `.app`
++/// bundle as this service. No code-signing-identifier requirement is pinned
++/// yet -- that hardening lives on the not-yet-merged
++/// `audit-2026-09/xpc-trust-and-hardened-signing` branch.
++enum PeerTrust {
++    /// Restricts connections to processes that are part of *this same app
++    /// bundle* (the host app and its two Quick Look extensions).
++    ///
++    /// - Parameter ownAppRoot: the enclosing `.app` bundle path a peer must
++    ///   also live under to be trusted. Defaults to this process's own
++    ///   bundle root; overridable so the check can be exercised against a
++    ///   fixture root in tests without the test binary itself needing to run
++    ///   from inside a real bundle copy.
++    static func isTrustedPeer(pid: pid_t,
++                              ownAppRoot: String? = BundleLayout.enclosingAppBundlePath(
++                                for: Bundle.main.bundleURL)) -> Bool {
++        guard let ownAppRoot else { return false }
++
++        var code: SecCode?
++        let attributes = [kSecGuestAttributePid: pid] as CFDictionary
++        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
++              let peerCode = code else {
++            return false
++        }
++        guard SecCodeCheckValidity(peerCode, [], nil) == errSecSuccess else {
++            return false
++        }
++
++        var staticCode: SecStaticCode?
++        guard SecCodeCopyStaticCode(peerCode, [], &staticCode) == errSecSuccess,
++              let staticCode else {
++            return false
++        }
++        var pathRef: CFURL?
++        guard SecCodeCopyPath(staticCode, [], &pathRef) == errSecSuccess,
++              let peerPath = pathRef as URL? else {
++            return false
++        }
++        guard let peerAppRoot = BundleLayout.enclosingAppBundlePath(for: peerPath) else {
++            return false
++        }
++        return peerAppRoot == ownAppRoot
++    }
++}
+diff --git a/Sources/RenderService/main.swift b/Sources/RenderService/main.swift
+index f25561f..aac8f06 100644
+--- a/Sources/RenderService/main.swift
++++ b/Sources/RenderService/main.swift
+@@ -1,6 +1,5 @@
+ import Foundation
+ import os
+-import Security
+ 
+ /// XPC service entry point. `NSXPCListener.service()` runs the service event
+ /// loop and never returns.
+@@ -10,7 +9,7 @@ final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
+ 
+     func listener(_ listener: NSXPCListener,
+                   shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
+-        guard Self.isTrustedPeer(pid: newConnection.processIdentifier) else {
++        guard PeerTrust.isTrustedPeer(pid: newConnection.processIdentifier) else {
+             Self.log.error("Rejected XPC connection from untrusted peer pid \(newConnection.processIdentifier, privacy: .public)")
+             return false
+         }
+@@ -19,47 +18,6 @@ final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
+         newConnection.resume()
+         return true
+     }
+-
+-    /// Restricts connections to processes that are part of *this same app
+-    /// bundle* (the Host app and its two Quick Look extensions).
+-    ///
+-    /// Release builds are ad-hoc signed (no Apple Developer Team ID), so we
+-    /// can't pin to a shared Team ID the way a notarized app would. Instead
+-    /// we require the peer's code signature to be internally consistent
+-    /// (unmodified since signing) *and* its on-disk executable to live inside
+-    /// the same `.app` bundle as this service. That's enough to reject an
+-    /// unrelated local process that merely guessed the mach service name,
+-    /// which is the actual gap this closes.
+-    private static func isTrustedPeer(pid: pid_t) -> Bool {
+-        guard let ownAppRoot = BundleLayout.enclosingAppBundlePath(for: Bundle.main.bundleURL) else {
+-            return false
+-        }
+-
+-        var code: SecCode?
+-        let attributes = [kSecGuestAttributePid: pid] as CFDictionary
+-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
+-              let peerCode = code else {
+-            return false
+-        }
+-        guard SecCodeCheckValidity(peerCode, [], nil) == errSecSuccess else {
+-            return false
+-        }
+-
+-        var staticCode: SecStaticCode?
+-        guard SecCodeCopyStaticCode(peerCode, [], &staticCode) == errSecSuccess,
+-              let staticCode else {
+-            return false
+-        }
+-        var pathRef: CFURL?
+-        guard SecCodeCopyPath(staticCode, [], &pathRef) == errSecSuccess,
+-              let peerPath = pathRef as URL? else {
+-            return false
+-        }
+-        guard let peerAppRoot = BundleLayout.enclosingAppBundlePath(for: peerPath) else {
+-            return false
+-        }
+-        return peerAppRoot == ownAppRoot
+-    }
+ }
+ 
+ let delegate = ServiceDelegate()
+diff --git a/Tests/PeerTrustTests.swift b/Tests/PeerTrustTests.swift
+new file mode 100644
+index 0000000..ea1651e
+--- /dev/null
++++ b/Tests/PeerTrustTests.swift
+@@ -0,0 +1,89 @@
++import Foundation
++import XCTest
++
++/// The negative XPC peer-rejection test from issue #11: a second,
++/// separately ad-hoc signed fixture process attempts to be treated as a
++/// trusted peer, and is expected to be refused. `PeerTrust.swift`'s
++/// extraction out of `main.swift` (which has top-level executable
++/// statements and so cannot be linked into a test target) is what makes this
++/// reachable at all -- no real XPC connection or launchd registration is
++/// needed, since `isTrustedPeer` only needs a running process's pid.
++final class PeerTrustTests: XCTestCase {
++    private var workDir: URL!
++    private var spawnedPeers: [Process] = []
++
++    override func setUpWithError() throws {
++        let candidate = FileManager.default.temporaryDirectory
++            .appendingPathComponent("PeerTrustTests-\(UUID().uuidString)")
++        try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
++        // `realpath(3)`, not `URL.resolvingSymlinksInPath()`: the latter
++        // special-cases `/tmp`, `/var` and `/etc` and leaves them
++        // unresolved, but `SecCodeCopyPath` returns the peer's fully
++        // resolved path (macOS's real temp dir is under `/private/var`,
++        // `FileManager.temporaryDirectory` under the `/var` symlink to it)
++        // -- without matching that, the comparison below fails even for a
++        // legitimately-inside-the-bundle peer, for a reason that has
++        // nothing to do with trust.
++        workDir = URL(fileURLWithPath: try canonicalPath(candidate.path))
++    }
++
++    private func canonicalPath(_ path: String) throws -> String {
++        guard let resolved = realpath(path, nil) else {
++            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
++        }
++        defer { free(resolved) }
++        return String(cString: resolved)
++    }
++
++    override func tearDown() {
++        for peer in spawnedPeers where peer.isRunning {
++            peer.terminate()
++            peer.waitUntilExit()
++        }
++        spawnedPeers.removeAll()
++        try? FileManager.default.removeItem(at: workDir)
++    }
++
++    func testPeerInsideTheAppBundleRootIsTrusted() throws {
++        let appRoot = workDir.appendingPathComponent("Fixture.app")
++        let pid = try spawnSignedPeer(at: "Fixture.app/Contents/MacOS/legit-peer",
++                                       signingIdentifier: "com.example.eps-preview-tests.legit")
++
++        XCTAssertTrue(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: appRoot.path))
++    }
++
++    func testPeerOutsideTheAppBundleRootIsRejected() throws {
++        let appRoot = workDir.appendingPathComponent("Fixture.app")
++        let pid = try spawnSignedPeer(at: "not-inside-any-app-bundle/evil-peer",
++                                       signingIdentifier: "com.example.eps-preview-tests.evil")
++
++        XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: appRoot.path),
++                        "a separately-signed peer outside our app bundle must be refused")
++    }
++
++    /// Builds a small, harmless, genuinely running process at `relativePath`
++    /// (under `workDir`), ad-hoc signed with a distinct `signingIdentifier`
++    /// -- modeled on `scripts/build.sh`'s own `sign()` helper -- and returns
++    /// its pid so `PeerTrust` can inspect it via real `SecCode` APIs, the
++    /// same way it inspects a real XPC peer.
++    private func spawnSignedPeer(at relativePath: String, signingIdentifier: String) throws -> pid_t {
++        let executable = workDir.appendingPathComponent(relativePath)
++        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(),
++                                                 withIntermediateDirectories: true)
++        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: executable)
++
++        let sign = Process()
++        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
++        sign.arguments = ["--force", "--sign", "-", "--identifier", signingIdentifier, executable.path]
++        try sign.run()
++        sign.waitUntilExit()
++        XCTAssertEqual(sign.terminationStatus, 0, "ad-hoc signing the fixture peer must succeed")
++
++        let peer = Process()
++        peer.executableURL = executable
++        peer.arguments = ["30"]
++        try peer.run()
++        spawnedPeers.append(peer)
++        return peer.processIdentifier
++    }
++}
+diff --git a/project.yml b/project.yml
+index cfbcda8..af2b12d 100644
+--- a/project.yml
++++ b/project.yml
+@@ -147,6 +147,10 @@ targets:
+       - path: Tests/Fixtures
+         type: folder
+       - path: Sources/Shared
++      # Not the whole RenderService target (that would drag in main.swift's
++      # top-level executable statements, which Swift forbids linking into a
++      # test target) -- just the one file PeerTrustTests exercises.
++      - path: Sources/RenderService/PeerTrust.swift
+     settings:
+       base:
+         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.Tests
+-- 
+2.50.1 (Apple Git-155)
+

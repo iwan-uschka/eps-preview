@@ -9,7 +9,7 @@ import XCTest
 /// reachable at all -- no real XPC connection or launchd registration is
 /// needed, since `isTrustedPeer` only needs a running process's pid.
 final class PeerTrustTests: XCTestCase {
-    private var workDir: URL!
+    private var workDir = URL(fileURLWithPath: NSTemporaryDirectory())
     private var spawnedPeers: [Process] = []
 
     override func setUpWithError() throws {
@@ -42,6 +42,15 @@ final class PeerTrustTests: XCTestCase {
         }
         spawnedPeers.removeAll()
         try? FileManager.default.removeItem(at: workDir)
+    }
+
+    func testPeerInADifferentAppBundleIsRejected() throws {
+        let appRoot = workDir.appendingPathComponent("Fixture.app")
+        let pid = try spawnSignedPeer(at: "Evil.app/Contents/MacOS/evil-peer",
+                                       signingIdentifier: "com.example.eps-preview-tests.evil")
+
+        XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: appRoot.path),
+                        "a peer inside a different app bundle must be refused")
     }
 
     func testPeerInsideTheAppBundleRootIsTrusted() throws {

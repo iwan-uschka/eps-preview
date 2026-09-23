@@ -7,13 +7,18 @@ import Security
 /// and so can never be linked into a test target) so this decision is
 /// reachable by `PeerTrustTests`, which spawns a real, separately ad-hoc
 /// signed second process and asserts it is refused. Behavior is unchanged
-/// from the check this replaces: containment within the same on-disk `.app`
-/// bundle as this service. No code-signing-identifier requirement is pinned
-/// yet -- that hardening lives on the not-yet-merged
-/// `audit-2026-09/xpc-trust-and-hardened-signing` branch.
+/// from the check this replaces.
 enum PeerTrust {
     /// Restricts connections to processes that are part of *this same app
     /// bundle* (the host app and its two Quick Look extensions).
+    ///
+    /// Release builds are ad-hoc signed (no Apple Developer Team ID), so we
+    /// can't pin to a shared Team ID the way a notarized app would. Instead
+    /// we require the peer's code signature to be internally consistent
+    /// (unmodified since signing) *and* its on-disk executable to live inside
+    /// the same `.app` bundle as this service. That's enough to reject an
+    /// unrelated local process that merely guessed the mach service name.
+    /// No code-signing-identifier requirement is pinned yet.
     ///
     /// - Parameter ownAppRoot: the enclosing `.app` bundle path a peer must
     ///   also live under to be trusted. Defaults to this process's own
