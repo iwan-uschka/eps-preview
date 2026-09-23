@@ -11,8 +11,10 @@ macOS runners can't reliably drive it either. So it stays a manual checklist:
 run it yourself, by hand, logged into a real Mac, before tagging a release.
 
 Re-run this whenever `Sources/QuickLook`, `Sources/Thumbnail`,
-`Sources/RenderService`, or `Sources/Shared` changes, and always before
-cutting a release DMG (`scripts/package-release.sh`).
+`Sources/RenderService`, `Sources/Shared`, or `Sources/Host` changes, or
+`project.yml` or `scripts/build.sh`, `scripts/install.sh`,
+`scripts/uninstall.sh` changes, and always before cutting a release DMG
+(`scripts/package-release.sh`).
 
 ## 1. Set up
 
@@ -52,6 +54,15 @@ Add a few more by hand:
   pathological PostScript body that loops (`{(A) print} loop`, should be
   terminated by the render service's own timeout rather than hanging
   Finder itself).
+
+**Release-candidate variant:** `make_install.sh` is a source build, which
+calls your Homebrew `gs` at runtime — it does not exercise the pinned
+Ghostscript and bundled libraries a release DMG ships (see `README.md`'s
+"Build from source" section). Before cutting a release, also build the DMG
+with `bash scripts/package-release.sh`, install `EPSPreview.app` from it the
+way `README.md`'s "Option A" describes (drag into Applications, "Open
+Anyway"), and ideally do this on a machine or account without Homebrew `gs`
+on `PATH`. Then run §2–§5 against that install too.
 
 ## 2. Finder thumbnails
 
@@ -99,7 +110,7 @@ For each file in the scratch folder:
 ## 5. Uninstall
 
 ```bash
-bash scripts/uninstall.sh
+bash scripts/make_uninstall.sh
 ```
 
 Confirm **EPS Preview** no longer appears under Login Items & Extensions,
@@ -109,8 +120,9 @@ falls back to Finder's default (no preview / generic icon), not a crash.
 ## 6. Record the result
 
 Before tagging a release, note in the release notes or PR description: the
-macOS version tested (this project targets 15/Sequoia and 26/Tahoe — test on
-whichever you have, ideally both over time) and pass/fail for each section
+macOS version tested (this project supports macOS 14+ and specifically
+targets 15/Sequoia and 26/Tahoe — test on whichever you have, ideally all
+over time) and pass/fail for each section
 above. A failure here blocks the release regardless of what the automated
 suites report — this is the only check that exercises the real
 Finder/PluginKit/Quick Look integration end to end.
