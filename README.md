@@ -275,6 +275,10 @@ remote. Needs
 `brew install shellcheck swiftlint`. Prefix a single command with
 `SKIP_HOOKS=1` to bypass them in an emergency.
 
+None of the above drives the actual Finder/Quick Look integration — see
+[MANUAL-TESTING.md](MANUAL-TESTING.md) for the manual checklist to run before
+tagging a release.
+
 ## Project layout
 
 | Path | What |
@@ -285,6 +289,7 @@ remote. Needs
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
 | `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
+| `MANUAL-TESTING.md` | Manual Quick Look/Finder end-to-end checklist, run before each release |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |
 | `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |
