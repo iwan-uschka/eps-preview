@@ -5,6 +5,7 @@
 #   lib/*.dylib         every non-system library it transitively needs
 #   share/Resource/…    gs init / font / resource files
 #   share/lib/…
+#   share/iccprofiles/… default colour-space ICC profiles (gs_lev2.ps needs them)
 #
 # This lets the app render EPS on machines without Homebrew. Ghostscript is
 # built from its own upstream source (AGPL-3.0 — the produced binary is

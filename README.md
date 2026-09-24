@@ -167,8 +167,10 @@ libarchive dependency closure it drags in, which this EPS→PDF converter never
 uses) is never built in the first place. The rest of Ghostscript's
 dependencies (fontconfig, freetype, jbig2dec, jpeg-turbo, libpng, libtiff,
 little-cms2, openjpeg, libidn) are still installed from Homebrew and linked
-in. Bumping the Ghostscript version means updating both the version and the
-sha256 deliberately, after reviewing the changelog/CVEs.
+in. Building Ghostscript from source needs the Xcode Command Line Tools,
+Homebrew, and network access to download the tarball. Bumping the Ghostscript
+version means updating both the version and the sha256 deliberately, after
+reviewing the changelog/CVEs.
 
 `package-release.sh` also pins the ~14 libraries Ghostscript links against, by
 hash, in `scripts/ghostscript-dependencies.txt`. If Homebrew's copies differ
