@@ -16,6 +16,21 @@ enum GhostscriptLocator {
     struct Ghostscript {
         let executablePath: String
         let environment: [String: String]
+
+        /// Root directories the sandboxed render child needs to *read*
+        /// beyond its two temp files: wherever this interpreter's own
+        /// binary, dylibs and resource files live. `GhostscriptSandbox`
+        /// turns these into `subpath` rules — everything else on disk stays
+        /// unreadable to `gs` even if `-dSAFER` is fully bypassed. Empty by
+        /// default so existing call sites (tests, older fixtures) that don't
+        /// care about sandboxing keep compiling.
+        let sandboxReadOnlyRoots: [String]
+
+        init(executablePath: String, environment: [String: String], sandboxReadOnlyRoots: [String] = []) {
+            self.executablePath = executablePath
+            self.environment = environment
+            self.sandboxReadOnlyRoots = sandboxReadOnlyRoots
+        }
     }
 
     /// `scripts/lib/ghostscript-check.sh` mirrors this list, the ownership
@@ -105,7 +120,15 @@ enum GhostscriptLocator {
 
         // The bundled copy is version-pinned at package time and sealed by the
         // app's signature, so it needs neither ownership nor version vetting.
-        return Ghostscript(executablePath: binary.path, environment: childEnvironment(gsLib: gsLib))
+        //
+        // The sandbox read root is the *whole* Helpers/gs and Resources/ghostscript
+        // trees, not just the three GS_LIB entries above: those cover the Init/
+        // lib/Font search path gs is told about explicitly, but the resource
+        // tree also holds things gs looks up by its own convention (Resource/
+        // CMap, iccprofiles, ...) that GS_LIB does not need to name.
+        return Ghostscript(executablePath: binary.path,
+                           environment: childEnvironment(gsLib: gsLib),
+                           sandboxReadOnlyRoots: [binary.deletingLastPathComponent().path, share.path])
     }
 
     /// Candidates are probed in order, and each probe is bounded only by
@@ -119,9 +142,29 @@ enum GhostscriptLocator {
         where FileManager.default.isExecutableFile(atPath: path)
             && hasTrustworthyOwnership(path)
             && meetsMinimumVersion(path) {
-            return Ghostscript(executablePath: path, environment: childEnvironment())
+            return Ghostscript(executablePath: path,
+                               environment: childEnvironment(),
+                               sandboxReadOnlyRoots: [prefixRoot(forSystemCandidate: path)])
         }
         return nil
+    }
+
+    /// A system `gs`'s dependencies (dylibs, fontconfig, its own resource
+    /// tree) are scattered across its whole install prefix in a way this
+    /// project does not enumerate and Homebrew/MacPorts upgrades can
+    /// rearrange — so the sandbox read root is the prefix itself, derived
+    /// from the fixed `.../bin/gs` shape every entry in `systemCandidates`
+    /// has. Narrower than "no sandbox at all", but not as tight as the
+    /// bundled copy's precisely-known tree.
+    ///
+    /// Not `private`, like `versionString`/`hasTrustworthyOwnership`: a test
+    /// can exercise this pure string transform directly without a real
+    /// Ghostscript install on disk, and it is worth pinning on its own — if
+    /// `systemCandidates` ever grows an entry that does not end in `/bin/gs`,
+    /// this must change too, or the sandbox read root for that candidate
+    /// silently comes out wrong.
+    static func prefixRoot(forSystemCandidate path: String) -> String {
+        String(path.dropLast("/bin/gs".count))
     }
 
     /// Rejects a candidate that some *other* unprivileged account could have

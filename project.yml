@@ -99,9 +99,12 @@ targets:
         WRAPPER_EXTENSION: appex
 
   # ──────────────────────────────────────────────────────────────────────
-  # Render XPC service. NOT sandboxed — this is what lets it spawn the
-  # system Ghostscript freely. A copy is embedded into each extension's
-  # Contents/XPCServices by scripts/build.sh.
+  # Render XPC service. The service process itself is NOT sandboxed — that
+  # is what lets it locate and spawn the system Ghostscript freely — but
+  # every `gs` child it launches runs under its own `sandbox-exec` profile
+  # (GhostscriptSandbox) confined to its scratch directory and resource
+  # tree, network and everything-else-exec denied. A copy is embedded into
+  # each extension's Contents/XPCServices by scripts/build.sh.
   # ──────────────────────────────────────────────────────────────────────
   RenderService:
     type: xpc-service

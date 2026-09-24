@@ -166,6 +166,18 @@ final class GhostscriptLocatorTests: XCTestCase {
         XCTAssertFalse(GhostscriptLocator.versionString("GPL Ghostscript 9.55", meetsMinimum: minimum))
     }
 
+    // MARK: - Sandbox read root
+
+    func testPrefixRootStripsTheBinGsSuffix() {
+        XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/opt/homebrew/bin/gs"),
+                      "/opt/homebrew")
+        XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/usr/local/bin/gs"),
+                      "/usr/local")
+        XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/opt/local/bin/gs"),
+                      "/opt/local")
+        XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/usr/bin/gs"), "/usr")
+    }
+
     // MARK: - Ownership and permission vetting
 
     /// Creates `<temp>/<uuid>/gs` and returns its path, with both the file and
