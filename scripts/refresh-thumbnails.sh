@@ -6,7 +6,8 @@
 set -euo pipefail
 
 echo "Resetting Quick Look thumbnail cache…"
-qlmanage -r cache >/dev/null 2>&1 || true
+qlmanage -r cache >/dev/null || {
+  echo "error: qlmanage -r cache failed — the thumbnail cache was NOT reset"; exit 1; }
 
 echo "Restarting Finder and thumbnail agents…"
 killall Finder                               >/dev/null 2>&1 || true

@@ -12,8 +12,43 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/build/Build/Products/Release/EPSPreview.app"
 DEST="/Applications/EPSPreview.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+QUICKLOOK_ID=com.zhangyanbo.EPSPreview.QuickLook
+THUMBNAIL_ID=com.zhangyanbo.EPSPreview.Thumbnail
 
 [ -d "$APP" ] || { echo "error: not built yet. Run: bash scripts/build.sh"; exit 1; }
+
+# Each extension must carry its own copy of the render service — a sandboxed
+# appex can only reach an XPC service inside its own bundle, so an extension
+# without one previews nothing. `codesign --verify --deep --strict` below does
+# not catch this: deep verification only checks nested code that is actually
+# present, it never asserts that something ought to be there. Measured — it
+# returns 0 on an app whose extensions have had XPCServices removed.
+assert_embedded_service() {
+  local appex="$1"
+  [ -d "$APP/Contents/PlugIns/$appex/Contents/XPCServices/RenderService.xpc" ] || {
+    echo "error: $appex is missing its embedded RenderService.xpc."
+    echo "       This usually means \`xcodebuild ... test\` ran after \`build.sh\` and"
+    echo "       silently stripped it (Xcode's test-phase rebuild only produces the"
+    echo "       app; build.sh is the only thing that re-embeds). Rerun: bash scripts/build.sh"
+    exit 1
+  }
+}
+assert_embedded_service EPSQuickLook.appex
+assert_embedded_service EPSThumbnail.appex
+
+# Poll for the observable condition instead of guessing a sleep duration —
+# LaunchServices/PluginKit take arbitrarily long on a loaded machine.
+wait_until() {
+  local timeout="$1"; shift
+  local waited=0
+  while ! "$@"; do
+    [ "$waited" -lt "$((timeout * 4))" ] || return 1
+    sleep 0.25
+    waited=$((waited + 1))
+  done
+}
+processes_gone() { ! pgrep -qx 'EPSPreview|EPSQuickLook|EPSThumbnail|RenderService'; }
+extension_registered() { [ -n "$(pluginkit -m -i "$1" 2>/dev/null)" ]; }
 
 echo "── Checking Ghostscript ──"
 # Any rejected candidate explains itself on stderr, above the summary line.
@@ -40,15 +75,28 @@ killall EPSPreview EPSQuickLook EPSThumbnail RenderService >/dev/null 2>&1 || tr
 # Drop any stray registration of the build-tree copy so the system can't
 # serve stale extension code.
 "$LSREGISTER" -u "$APP" >/dev/null 2>&1 || true
-sleep 1
+wait_until 10 processes_gone || echo "  ⚠️  EPS Preview processes still running; replacing the bundle anyway"
 rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+# The render service only talks to peers inside the *same* app bundle, so the
+# signature has to be intact at the installed path, not just in build/.
+codesign --verify --deep --strict "$DEST" || {
+  echo "error: signature invalid at $DEST — rebuild with: bash scripts/build.sh"; exit 1; }
+echo "  ✓ signature valid at $DEST"
 
 echo "── Registering extensions ──"
 "$LSREGISTER" -f -R "$DEST"
 open "$DEST"
-sleep 3
+REGISTERED=1
+for id in "$QUICKLOOK_ID" "$THUMBNAIL_ID"; do
+  if wait_until 15 extension_registered "$id"; then
+    echo "  ✓ $id registered"
+  else
+    echo "  ⚠️  $id not reported by pluginkit"
+    REGISTERED=0
+  fi
+done
 
 echo "── Refreshing Finder thumbnails ──"
 # Reset only the thumbnail cache (NOT `qlmanage -r`, which de-registers
@@ -64,7 +112,11 @@ killall com.apple.quicklook.ThumbnailsAgent >/dev/null 2>&1 || true
 killall Finder >/dev/null 2>&1 || true
 
 echo
-echo "✓ Installed."
+if [ "$REGISTERED" -eq 1 ]; then
+  echo "✓ Installed."
+else
+  echo "⚠️  Installed, but macOS has not registered the extensions yet."
+fi
 echo "  Select any .eps / .ps file in Finder and press the Space bar."
 echo
 echo "  If the preview doesn't appear immediately, enable it once under:"

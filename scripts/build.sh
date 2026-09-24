@@ -10,14 +10,27 @@ cd "$ROOT"
 
 command -v xcodegen >/dev/null 2>&1 || {
   echo "error: xcodegen not found. Install with: brew install xcodegen"; exit 1; }
+# The Command Line Tools alone ship an xcodebuild stub that fails opaquely
+# ("tool 'xcodebuild' requires Xcode"), so check for a real Xcode up front.
+xcodebuild -version >/dev/null 2>&1 || {
+  echo "error: full Xcode required (xcode-select -p → $(xcode-select -p 2>/dev/null))"
+  echo "       Install Xcode, then: sudo xcode-select -s /Applications/Xcode.app"
+  exit 1; }
 
-echo "── (1/5) Generating Xcode project ──"
+# Marketing version to stamp into the built bundles; scripts/package-release.sh
+# sets it from its version argument. Unset → keep whatever the source
+# Info.plists declare.
+MARKETING_VERSION="${EPS_MARKETING_VERSION:-}"
+if [ -n "$MARKETING_VERSION" ] && ! [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: EPS_MARKETING_VERSION must be MAJOR.MINOR.PATCH (got '$MARKETING_VERSION')"; exit 1
+fi
+
+echo "── (1/7) Generating Xcode project ──"
 xcodegen generate
 
 echo
-echo "── (2/5) Building (Release) ──"
+echo "── (2/7) Building (Release) ──"
 if command -v xcbeautify >/dev/null 2>&1; then BEAUTIFY=(xcbeautify); else BEAUTIFY=(cat); fi
-set -o pipefail
 xcodebuild \
   -project EPSPreview.xcodeproj \
   -scheme EPSPreview \
@@ -34,7 +47,7 @@ SERVICE="build/Build/Products/Release/RenderService.xpc"
 [ -d "$SERVICE" ] || { echo "error: build produced no $SERVICE"; exit 1; }
 
 echo
-echo "── (3/5) Embedding RenderService.xpc into each extension ──"
+echo "── (3/7) Embedding RenderService.xpc into each extension ──"
 # A sandboxed extension can only reach an XPC service that lives inside its
 # own bundle (Contents/XPCServices). So each extension carries its own copy.
 embed_service() {
@@ -46,64 +59,70 @@ embed_service() {
 }
 embed_service "$APP/Contents/PlugIns/EPSQuickLook.appex"
 embed_service "$APP/Contents/PlugIns/EPSThumbnail.appex"
-embed_service "$APP"
 
 echo
-echo "── (3.5/5) Pinning NSExtension blocks in built Info.plists ──"
+echo "── (4/7) Pinning NSExtension blocks in built Info.plists ──"
 # Xcode has been observed to drop/rewrite the NSExtension block on build.
-# Re-assert it directly in the built bundles so registration is reliable.
+# Re-assert it directly in the built bundles so registration is reliable —
+# copied from the source Info.plist, which stays the single source of truth,
+# then diffed back so a failed copy can never ship silently.
 patch_extension() {
-  local plist="$1" point="$2" principal="$3" extra_key="$4" extra_type="$5" extra_val="$6"
+  local plist="$1" source_plist="$2" block
+  block="$(mktemp -t NSExtension.plist)"
+  /usr/libexec/PlistBuddy -x -c "Print :NSExtension" "$source_plist" > "$block"
   /usr/libexec/PlistBuddy -c "Delete :NSExtension" "$plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy \
-    -c "Add :NSExtension dict" \
-    -c "Add :NSExtension:NSExtensionPointIdentifier string $point" \
-    -c "Add :NSExtension:NSExtensionPrincipalClass string $principal" \
-    -c "Add :NSExtension:NSExtensionAttributes dict" \
-    -c "Add :NSExtension:NSExtensionAttributes:QLSupportedContentTypes array" \
-    -c "Add :NSExtension:NSExtensionAttributes:QLSupportedContentTypes:0 string com.adobe.encapsulated-postscript" \
-    -c "Add :NSExtension:NSExtensionAttributes:QLSupportedContentTypes:1 string com.adobe.postscript" \
-    -c "Add :NSExtension:NSExtensionAttributes:$extra_key $extra_type $extra_val" \
-    "$plist"
-  echo "  patched $(basename "$(dirname "$(dirname "$plist")")")"
+  /usr/libexec/PlistBuddy -c "Add :NSExtension dict" -c "Merge $block :NSExtension" "$plist"
+  diff <(/usr/libexec/PlistBuddy -x -c "Print :NSExtension" "$plist") "$block" || {
+    echo "error: NSExtension in $plist diverges from $source_plist"; exit 1; }
+  rm -f "$block"
+  echo "  patched $(basename "$(dirname "$(dirname "$plist")")") from $source_plist"
 }
 patch_extension \
   "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/Info.plist" \
-  "com.apple.quicklook.preview" "EPSQuickLook.PreviewViewController" \
-  "QLSupportsSearchableItems" "bool" "false"
+  Sources/QuickLook/Info.plist
 patch_extension \
   "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/Info.plist" \
-  "com.apple.quicklook.thumbnail" "EPSThumbnail.ThumbnailProvider" \
-  "QLThumbnailMinimumSize" "integer" "16"
+  Sources/Thumbnail/Info.plist
 
 echo
-echo "── (3.6/5) Stamping build version ──"
+echo "── (5/7) Stamping build version ──"
 # Give every rebuild a unique, monotonically increasing CFBundleVersion so
 # LaunchServices / PluginKit never serve cached *old* extension code after
 # a reinstall.
 BUILD_VERSION="$(date +%Y%m%d%H%M%S)"
+set_plist_string() {
+  local plist="$1" key="$2" value="$3"
+  /usr/libexec/PlistBuddy -c "Set :$key $value" "$plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :$key string $value" "$plist"
+}
 for plist in \
   "$APP/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/Info.plist" \
-  "$APP/Contents/XPCServices/RenderService.xpc/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc/Contents/Info.plist" \
   "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc/Contents/Info.plist"; do
   [ -f "$plist" ] || continue
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$plist" 2>/dev/null \
-    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD_VERSION" "$plist"
+  set_plist_string "$plist" CFBundleVersion "$BUILD_VERSION"
+  if [ -n "$MARKETING_VERSION" ]; then
+    set_plist_string "$plist" CFBundleShortVersionString "$MARKETING_VERSION"
+  fi
 done
 echo "  CFBundleVersion = $BUILD_VERSION"
+if [ -n "$MARKETING_VERSION" ]; then
+  echo "  CFBundleShortVersionString = $MARKETING_VERSION"
+fi
 
 echo
-echo "── (4/5) Ad-hoc signing (inside-out) ──"
-sign() { codesign --force --sign - --timestamp=none "$@"; }
+echo "── (6/7) Ad-hoc signing (inside-out) ──"
+# --options runtime is load-bearing, not cosmetic: the render service's peer
+# check is only meaningful if a validated peer binary can't be hijacked
+# in-process via DYLD_INSERT_LIBRARIES.
+sign() { codesign --force --sign - --timestamp=none --options runtime "$@"; }
 
 # 1. The unsandboxed render service copies (no entitlements → unsandboxed).
 sign "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
 sign "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
-sign "$APP/Contents/XPCServices/RenderService.xpc"
-echo "  signed 3× RenderService.xpc (unsandboxed)"
+echo "  signed 2× RenderService.xpc (unsandboxed)"
 
 # 2. The sandboxed extensions, each with its entitlements.
 sign --entitlements Sources/QuickLook/QuickLook.entitlements \
@@ -118,8 +137,50 @@ sign --entitlements Sources/Host/Host.entitlements "$APP"
 echo "  signed EPSPreview.app"
 
 echo
-echo "── (5/5) Verifying signature graph ──"
-codesign --verify --deep --strict --verbose=2 "$APP" && echo "  ✓ valid"
+echo "── (7/7) Verifying signature graph and entitlements ──"
+# `cmd && echo ok` would let a verification failure slide past `set -e`.
+codesign --verify --deep --strict --verbose=2 "$APP" || {
+  echo "error: signature graph invalid for $APP"; exit 1; }
+echo "  ✓ valid"
+
+# --verify says nothing about entitlement *contents*, and the sandbox state is
+# load-bearing in both directions: macOS 15/26 refuse to register an
+# unsandboxed Quick Look extension at all, while a sandboxed RenderService
+# could not exec Ghostscript.
+assert_sandbox_state() {
+  local want="$1" path="$2" ents state
+  # Without this, a missing bundle reads as `absent`: codesign fails, leaves a
+  # 0-byte file, PlistBuddy exits 1 on it and the `|| state="absent"` fallback
+  # below turns that into a *pass*. Every `absent` assertion would then hold
+  # vacuously for a path the build forgot to produce.
+  [ -e "$path" ] || { echo "error: no bundle at $path"; exit 1; }
+  ents="$(mktemp)"
+  codesign -d --entitlements :- --xml "$path" >"$ents" 2>/dev/null || true
+  state="$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.app-sandbox" "$ents" 2>/dev/null)" \
+    || state="absent"
+  rm -f "$ents"
+  [ "$state" = "$want" ] || {
+    echo "error: com.apple.security.app-sandbox is '$state' on $path (expected '$want')"
+    exit 1; }
+  echo "  ✓ app-sandbox $state — ${path#"$APP/"}"
+}
+assert_sandbox_state true   "$APP"
+assert_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
+assert_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
+assert_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
+assert_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
+
+# The host embeds no render service of its own — assert the absence directly.
+# `assert_sandbox_state absent` cannot express this: it reports `absent` for a
+# path that is missing entirely just as readily as for one that is present and
+# unsandboxed, so it would pass here whether or not the removal held.
+[ ! -e "$APP/Contents/XPCServices/RenderService.xpc" ] || {
+  echo "error: host app still embeds Contents/XPCServices/RenderService.xpc"
+  exit 1; }
+echo "  ✓ no host-level RenderService.xpc"
+
+echo
+bash scripts/check-bundle-identifiers.sh
 
 echo
 echo "✓ Build complete: $APP"

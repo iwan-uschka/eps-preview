@@ -93,7 +93,7 @@ enum RenderClient {
         // the /Interpolate flag when writing the PDF.
         let interpolate = wantsInterpolation(data)
 
-        let connection = NSXPCConnection(serviceName: "com.zhangyanbo.EPSPreview.RenderService")
+        let connection = NSXPCConnection(serviceName: BundleIdentifiers.renderService)
         connection.remoteObjectInterface = NSXPCInterface(with: RenderProtocol.self)
 
         let didFinish = Atomic(false)

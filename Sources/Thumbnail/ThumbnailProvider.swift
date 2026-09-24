@@ -11,7 +11,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
                                    _ handler: @escaping (QLThumbnailReply?, Error?) -> Void) {
         RenderClient.render(fileURL: request.fileURL) { data, interpolate, errorMessage in
             func fail(_ message: String) {
-                handler(nil, NSError(domain: "com.zhangyanbo.EPSPreview", code: 1,
+                handler(nil, NSError(domain: BundleIdentifiers.app, code: 1,
                                      userInfo: [NSLocalizedDescriptionKey: message]))
             }
 

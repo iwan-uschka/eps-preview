@@ -13,11 +13,16 @@ struct EPSPreviewApp: App {
 struct ContentView: View {
     /// Asks the same locator the render service runs, rather than keeping a
     /// second copy of the candidate list here: this window is the only place a
-    /// user is told whether previews will work, so a green check must mean the
-    /// service accepted that Ghostscript — ownership vetting, 9.50 floor and
-    /// the app's own bundled copy included.
+    /// user is told whether previews will work.
+    ///
+    /// `isLikelyInstalled()` and not `locate()`, because this app is sandboxed:
+    /// the sandbox denies both the `access(X_OK)` probe behind
+    /// `isExecutableFile(atPath:)` and the `gs --version` exec that `locate()`
+    /// needs, so `locate()` would report a working Homebrew install as missing.
+    /// See that method's note for what the sandbox does and does not allow, and
+    /// for why under-reporting was judged worse than over-reporting here.
     private var ghostscriptInstalled: Bool {
-        GhostscriptLocator.locate() != nil
+        GhostscriptLocator.isLikelyInstalled()
     }
 
     var body: some View {

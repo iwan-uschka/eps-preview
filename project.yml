@@ -31,14 +31,17 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
     PROVISIONING_PROFILE_SPECIFIER: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Load-bearing for the XPC peer check: without the hardened runtime,
+    # DYLD_INSERT_LIBRARIES gives an attacker a process that still passes
+    # every signature and identifier test the render service applies.
+    ENABLE_HARDENED_RUNTIME: YES
     DEAD_CODE_STRIPPING: YES
 
 targets:
 
   # ──────────────────────────────────────────────────────────────────────
-  # Host application. Ships the extensions + render service and shows a
-  # one-screen "installed" window.
+  # Host application. Ships the extensions and shows a one-screen "installed"
+  # window. It never renders, so it embeds no render service of its own.
   #
   # NOTE: we intentionally do NOT use XcodeGen's `info:` / `entitlements:`
   # keys — those make XcodeGen *generate* (and overwrite) the files. We
@@ -60,8 +63,6 @@ targets:
     dependencies:
       - target: EPSQuickLook
       - target: EPSThumbnail
-      - target: RenderService
-        embed: true
 
   # ──────────────────────────────────────────────────────────────────────
   # Quick Look preview extension (spacebar preview). Sandboxed, which macOS

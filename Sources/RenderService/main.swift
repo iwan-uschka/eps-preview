@@ -5,8 +5,8 @@ import Security
 /// XPC service entry point. `NSXPCListener.service()` runs the service event
 /// loop and never returns.
 final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
-    private static let log = Logger(subsystem: "com.zhangyanbo.EPSPreview.RenderService",
-                                     category: "xpc")
+    private static let log = Logger(subsystem: BundleIdentifiers.renderService,
+                                    category: "xpc")
 
     func listener(_ listener: NSXPCListener,
                   shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
