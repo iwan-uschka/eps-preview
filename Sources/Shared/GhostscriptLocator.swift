@@ -23,10 +23,11 @@ enum GhostscriptLocator {
         /// turns these into `subpath` rules — everything else on disk stays
         /// unreadable to `gs` even if `-dSAFER` is fully bypassed. Empty by
         /// default so existing call sites (tests, older fixtures) that don't
-        /// care about sandboxing keep compiling.
+        /// care about sandboxing pass `[]` explicitly; a production resolution
+        /// path that omits real roots would render nothing.
         let sandboxReadOnlyRoots: [String]
 
-        init(executablePath: String, environment: [String: String], sandboxReadOnlyRoots: [String] = []) {
+        init(executablePath: String, environment: [String: String], sandboxReadOnlyRoots: [String]) {
             self.executablePath = executablePath
             self.environment = environment
             self.sandboxReadOnlyRoots = sandboxReadOnlyRoots

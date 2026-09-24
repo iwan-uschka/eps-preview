@@ -11,7 +11,8 @@ struct RenderTermination {
     /// The exit status, or — when `killedBySignal` — the signal number.
     let status: Int32
     /// Whether *our* watchdog is what fired; a child can be signalled for
-    /// other reasons (the `ulimit -f` SIGXFSZ below among them).
+    /// other reasons (the `ulimit -f` SIGXFSZ and `ulimit -t` SIGXCPU below
+    /// among them).
     let timedOut: Bool
 }
 
@@ -40,6 +41,9 @@ enum RenderOutcome {
             }
             if termination.status == SIGXFSZ {
                 return (nil, "The rendered PDF exceeds the \(outputLimitMB) MB preview output limit.")
+            }
+            if termination.status == SIGXCPU {
+                return (nil, "Ghostscript exceeded its CPU time limit and was terminated.")
             }
         }
 

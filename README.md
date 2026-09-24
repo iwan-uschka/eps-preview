@@ -27,8 +27,13 @@ EPSPreview.app
 The sandboxed extensions hand an EPS path to the embedded, **unsandboxed**
 `RenderService`, which runs your system **Ghostscript** (`gs`) to convert it
 to PDF and returns the bytes. The extension then displays the PDF with
-PDFKit. Because the render happens in the unsandboxed helper, there are no
-sandbox gymnastics around executing `gs` or reading files.
+PDFKit. The service itself is unsandboxed so it can find and launch `gs`, but
+each `gs` child runs under its own `sandbox-exec` profile
+(`Sources/Shared/GhostscriptSandbox.swift`): it can read only its own
+install/resource tree and its scratch directory, write only to the scratch
+directory, cannot reach the network, and may execute only the resolved `gs`
+binary. That is a second layer behind `-dSAFER`, which has a history of full
+bypasses.
 
 A build from source does **not** bundle Ghostscript — it uses the copy you
 install via Homebrew. That keeps this project small and MIT-licensed, and
@@ -55,7 +60,8 @@ previews will fail with "Render service connection failed".
 Previews are bounded on purpose: EPS files larger than **100 MB** are refused
 up front, a single Ghostscript render is terminated after **20 s** (`-dSAFER`
 restricts file/network access but not CPU, so a pathological PostScript body
-could otherwise hang the helper), a rendered PDF larger than **64 MB** is
+could otherwise hang the helper; a CPU-time rlimit backstops that deadline, and
+a process-count rlimit stops `gs` forking further children), a rendered PDF larger than **64 MB** is
 rejected instead of being read into memory, and at most **3** renders run at
 once with at most **8** requests in flight — a Finder folder full of EPS files
 is throttled rather than fanned out into unbounded Ghostscript processes;
@@ -142,7 +148,7 @@ Login Items & Extensions → Quick Look, find and drop the stale copies with
 The `EPSPreviewTests` target covers `Sources/Shared` — the Ghostscript
 resolution cache and version floor, the admission counter, the render-outcome
 rules, the app-bundle layout helper, the thumbnail geometry and the page
-geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
+geometry / preview paging rules, and the Ghostscript sandbox profile — plus the committed `Tests/Fixtures` EPS
 inputs, which are checked for structural integrity so a truncated fixture fails
 loudly. The plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
@@ -215,8 +221,8 @@ remote. Needs
 | `Sources/Host` | Host app (SwiftUI status window) |
 | `Sources/QuickLook` | Quick Look preview extension |
 | `Sources/Thumbnail` | Thumbnail extension |
-| `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
-| `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
+| `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs` under a per-child `sandbox-exec` profile) |
+| `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator + sandbox profile (compiled into every target) |
 | `Tests` | XCTest unit tests for `Sources/Shared` plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |

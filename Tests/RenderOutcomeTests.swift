@@ -104,6 +104,15 @@ final class RenderOutcomeTests: XCTestCase {
                            + "\(RenderLimits.maxOutputBytes / (1024 * 1024)) MB preview output limit.")
     }
 
+    func testSIGXCPUIsReportedAsTheCPUTimeLimit() {
+        let result = RenderOutcome.result(for: signalled(SIGXCPU),
+                                          errorOutput: Data(),
+                                          outputPath: outputPath())
+
+        XCTAssertNil(result.pdf)
+        XCTAssertEqual(result.error, "Ghostscript exceeded its CPU time limit and was terminated.")
+    }
+
     func testAnOversizedOutputFileIsRejected() throws {
         let path = outputPath()
         try writeSparseFile(ofSize: RenderLimits.maxOutputBytes + 1, to: path)

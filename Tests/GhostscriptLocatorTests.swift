@@ -46,7 +46,7 @@ final class GhostscriptLocatorTests: XCTestCase {
     }
 
     private func ghostscript(_ path: String) -> GhostscriptLocator.Ghostscript {
-        GhostscriptLocator.Ghostscript(executablePath: path, environment: [:])
+        GhostscriptLocator.Ghostscript(executablePath: path, environment: [:], sandboxReadOnlyRoots: [])
     }
 
     // MARK: - Caching
@@ -57,7 +57,8 @@ final class GhostscriptLocatorTests: XCTestCase {
         let cache = GhostscriptResolutionCache(failureTTL: 30, clock: { now }, resolve: {
             calls.record()
             return GhostscriptLocator.Ghostscript(executablePath: "/opt/homebrew/bin/gs",
-                                                 environment: ["PATH": "/usr/bin:/bin"])
+                                                 environment: ["PATH": "/usr/bin:/bin"],
+                                                 sandboxReadOnlyRoots: [])
         })
 
         XCTAssertEqual(cache.locate()?.executablePath, "/opt/homebrew/bin/gs")
@@ -126,7 +127,8 @@ final class GhostscriptLocatorTests: XCTestCase {
             // Stands in for `gs --version`: slow enough that every other
             // caller is inside `locate()` while this one resolves.
             Thread.sleep(forTimeInterval: 0.1)
-            return GhostscriptLocator.Ghostscript(executablePath: "/opt/local/bin/gs", environment: [:])
+            return GhostscriptLocator.Ghostscript(executablePath: "/opt/local/bin/gs", environment: [:],
+                                                 sandboxReadOnlyRoots: [])
         })
 
         DispatchQueue.concurrentPerform(iterations: callers) { _ in
