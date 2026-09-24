@@ -159,13 +159,18 @@ A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
 shareable `.dmg` like the release, run `bash scripts/package-release.sh`.
 
-`package-release.sh` bundles a *pinned* Ghostscript version
-(`EXPECTED_GHOSTSCRIPT_VERSION` in `scripts/bundle-ghostscript.sh`). If your
-Homebrew has a different version the build stops on purpose; review the
-changelog/CVEs and bump the pin, or re-run with
-`ALLOW_GHOSTSCRIPT_VERSION_MISMATCH=1` to bundle anyway (not recommended).
+`package-release.sh` builds Ghostscript from a *pinned* upstream source
+tarball (`EXPECTED_GHOSTSCRIPT_VERSION` and `GHOSTSCRIPT_SOURCE_SHA256` in
+`scripts/bundle-ghostscript.sh`) rather than installing Homebrew's bottle —
+with `--without-tesseract`, so the OCR device (and the tesseract/leptonica/
+libarchive dependency closure it drags in, which this EPS→PDF converter never
+uses) is never built in the first place. The rest of Ghostscript's
+dependencies (fontconfig, freetype, jbig2dec, jpeg-turbo, libpng, libtiff,
+little-cms2, openjpeg, libidn) are still installed from Homebrew and linked
+in. Bumping the Ghostscript version means updating both the version and the
+sha256 deliberately, after reviewing the changelog/CVEs.
 
-`package-release.sh` also pins the ~20 libraries Ghostscript links against, by
+`package-release.sh` also pins the ~14 libraries Ghostscript links against, by
 hash, in `scripts/ghostscript-dependencies.txt`. If Homebrew's copies differ
 the build stops; review their changelogs/CVEs and either regenerate the
 manifest (delete it and re-run) or re-run with
