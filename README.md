@@ -30,6 +30,17 @@ your system **Ghostscript** (`gs`) to convert it to PDF and returns the bytes.
 The extension then displays the PDF with PDFKit. Because the render happens in
 the unsandboxed helper, there are no sandbox gymnastics around executing `gs`.
 
+This descriptor-not-path split is deliberate and security-load-bearing, not an
+implementation detail: the sandboxed extension is the process macOS grants
+TCC access to the previewed file (including files in protected locations
+like `~/Desktop`, `~/Documents`, `~/Downloads`), and `RenderService` has no
+such grant. **Do not change `RenderProtocol` to pass a path or URL instead of
+the open descriptor** — a refactor like that builds and smoke-tests cleanly
+on a dev machine (which already has broad TCC grants) and only fails,
+silently or with a confusing error, on an end user's machine. See
+[`Sources/Shared/RenderProtocol.swift`](Sources/Shared/RenderProtocol.swift)
+and [issue #13](https://github.com/iwan-uschka/eps-preview/issues/13).
+
 A build from source does **not** bundle Ghostscript — it uses the copy you
 install via Homebrew. That keeps this project small and MIT-licensed, and
 always uses an up-to-date `gs`. (The downloadable release does bundle one —

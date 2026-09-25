@@ -15,6 +15,17 @@ import Foundation
 /// into the receiving process, which keeps that property while avoiding the
 /// full-size message copy that sending the bytes as `Data` cost on every
 /// render.
+///
+/// DO NOT change this to a path- or URL-based API (e.g. "just pass the
+/// file's URL, why duplicate a descriptor"). That is a real security
+/// regression, not a cleanup: RenderService has no TCC grant for protected
+/// folders, so it would silently fail to open the path — or, if it were ever
+/// launched with broader privileges down the line, it would open a file the
+/// user only authorized the extension to read. This can't be caught by CI or
+/// a same-machine smoke test, because the developer's own machine already has
+/// broad TCC grants; it only breaks on an end user's machine. See the
+/// README's "How it works" section and
+/// https://github.com/iwan-uschka/eps-preview/issues/13.
 @objc protocol RenderProtocol {
     func renderEPSToPDF(input: FileHandle, withReply reply: @escaping (Data?, NSNumber?) -> Void)
 }
