@@ -135,8 +135,9 @@ bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.ym
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
-directly) — the scheme deliberately excludes the host app, both extensions, and
-the render XPC service from the `test` action. Building them there used to leave
+plus `Sources/RenderService/PeerTrust.swift` directly) — the scheme deliberately
+excludes the host app, both extensions, and the render XPC service from the
+`test` action. Building them there used to leave
 a full `EPSPreview.app` with embedded Quick Look/Thumbnail extensions (and
 RenderService) sitting in DerivedData after every test run, and macOS's
 LaunchServices auto-registers any such app it finds on disk — so every test run
@@ -154,7 +155,13 @@ resolution cache and version floor, the admission counter, the render-outcome
 rules, the app-bundle layout helper, the thumbnail geometry and the page
 geometry / preview paging rules — plus the committed `Tests/Fixtures` EPS
 inputs, which are checked for structural integrity so a truncated fixture fails
-loudly. The plain-bash suites (no dependencies) cover the shell side:
+loudly. It also covers `RenderService`'s XPC peer-trust decision
+(`Sources/RenderService/PeerTrust.swift`, pulled in as a single extra file so
+its top-level-statement-free logic can link into a test target):
+`PeerTrustTests` spawns a second, genuinely running, separately ad-hoc signed
+process outside the fixture app-bundle root and asserts it is refused, the
+negative counterpart to the same check accepting a peer inside that root. The
+plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
@@ -247,7 +254,7 @@ remote. Needs
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs`) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator (compiled into every target) |
-| `Tests` | XCTest unit tests for `Sources/Shared` plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
+| `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |
 | `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |

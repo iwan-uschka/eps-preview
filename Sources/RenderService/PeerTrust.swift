@@ -23,6 +23,11 @@ import Security
 /// every binary in the bundle is signed with the hardened runtime — without
 /// it `DYLD_INSERT_LIBRARIES` yields an attacker-controlled process whose
 /// signature and identifier still check out (see `scripts/build.sh`).
+///
+/// Extracted out of `main.swift` (which has top-level executable statements
+/// and so can never be linked into a test target) so this decision is
+/// reachable by `PeerTrustTests`, which spawns real, separately ad-hoc signed
+/// peer processes and asserts which ones are refused.
 enum PeerTrust {
     /// Ad-hoc `codesign --sign -` derives the signing identifier from
     /// `CFBundleIdentifier`, so these are the extensions' bundle IDs. The host
@@ -50,9 +55,15 @@ enum PeerTrust {
         return requirement
     }()
 
-    static func isTrustedPeer(pid: pid_t) -> Bool {
-        guard let ownAppRoot = BundleLayout.enclosingAppBundlePath(for: Bundle.main.bundleURL),
-              let requirement = compiledRequirement else {
+    /// - Parameter ownAppRoot: the enclosing `.app` bundle path a peer must
+    ///   also live under to be trusted. Defaults to this process's own
+    ///   bundle root; overridable so the check can be exercised against a
+    ///   fixture root in tests without the test binary itself needing to run
+    ///   from inside a real bundle copy.
+    static func isTrustedPeer(pid: pid_t,
+                              ownAppRoot: String? = BundleLayout.enclosingAppBundlePath(
+                                for: Bundle.main.bundleURL)) -> Bool {
+        guard let ownAppRoot, let requirement = compiledRequirement else {
             return false
         }
 
