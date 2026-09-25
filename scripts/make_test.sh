@@ -37,4 +37,12 @@ echo "── make_*.sh entry-point tests ──"
 bash scripts/test-make-scripts.sh
 
 echo
+echo "── refresh-thumbnails.sh tests ──"
+bash scripts/test-refresh-thumbnails.sh
+
+echo
+echo "── package-release.sh version-validation tests ──"
+bash scripts/test-package-release.sh
+
+echo
 echo "✓ All test suites passed."

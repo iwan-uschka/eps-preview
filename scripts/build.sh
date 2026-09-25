@@ -59,6 +59,11 @@ embed_service() {
 }
 embed_service "$APP/Contents/PlugIns/EPSQuickLook.appex"
 embed_service "$APP/Contents/PlugIns/EPSThumbnail.appex"
+# Earlier revisions of this script also embedded a host-level copy; Xcode's
+# incremental build does not prune it from an existing bundle, so remove it
+# here (step 7 still asserts its absence as a backstop).
+rm -rf "$APP/Contents/XPCServices/RenderService.xpc"
+rmdir "$APP/Contents/XPCServices" 2>/dev/null || true
 
 echo
 echo "── (4/7) Pinning NSExtension blocks in built Info.plists ──"
@@ -169,6 +174,24 @@ assert_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
 assert_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
+
+# The hardened runtime is load-bearing for the render service's peer check
+# (see sign() above), and --verify doesn't report it either. Output is
+# captured first rather than piped into `grep -q`, which under pipefail could
+# fail the check through codesign's SIGPIPE instead of a missing flag.
+assert_hardened_runtime() {
+  local path="$1" info
+  info="$(codesign -dv "$path" 2>&1)" || {
+    echo "error: cannot read code signature of $path"; exit 1; }
+  [[ "$info" =~ flags=[^$'\n']*runtime ]] || {
+    echo "error: hardened runtime flag missing on $path"; exit 1; }
+  echo "  ✓ hardened runtime — ${path#"$APP/"}"
+}
+assert_hardened_runtime "$APP"
+assert_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex"
+assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex"
+assert_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
+assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
 
 # The host embeds no render service of its own — assert the absence directly.
 # `assert_sandbox_state absent` cannot express this: it reports `absent` for a

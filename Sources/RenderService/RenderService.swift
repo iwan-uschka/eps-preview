@@ -29,7 +29,7 @@ final class RenderService: NSObject, RenderProtocol {
     /// `maxConcurrentRenders`, so raising that far would be the point to
     /// replace the blocking gate with an async-friendly one.
     private static let renderQueue = DispatchQueue(
-        label: "com.zhangyanbo.EPSPreview.RenderService.render",
+        label: BundleIdentifiers.renderService + ".render",
         attributes: .concurrent)
 
     /// Ghostscript's stderr is drained continuously, but only its head is

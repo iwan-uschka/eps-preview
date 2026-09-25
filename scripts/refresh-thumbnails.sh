@@ -6,8 +6,10 @@
 set -euo pipefail
 
 echo "Resetting Quick Look thumbnail cache…"
+# Strict here, unlike install.sh's best-effort cache reset: resetting the cache
+# is this script's whole job, so a failure must not end in a "Done" it did not earn.
 qlmanage -r cache >/dev/null || {
-  echo "error: qlmanage -r cache failed — the thumbnail cache was NOT reset"; exit 1; }
+  echo "error: qlmanage -r cache failed — the thumbnail cache was NOT reset" >&2; exit 1; }
 
 echo "Restarting Finder and thumbnail agents…"
 killall Finder                               >/dev/null 2>&1 || true

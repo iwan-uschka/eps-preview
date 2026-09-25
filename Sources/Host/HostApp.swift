@@ -26,15 +26,18 @@ struct ContentView: View {
     }
 
     var body: some View {
+        // Read once per evaluation: the check is uncached filesystem work, and
+        // a single read keeps the icon, its colour and the text in agreement.
+        let installed = ghostscriptInstalled
         VStack(spacing: 18) {
-            Image(systemName: ghostscriptInstalled ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+            Image(systemName: installed ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                 .font(.system(size: 52))
-                .foregroundStyle(ghostscriptInstalled ? .green : .orange)
+                .foregroundStyle(installed ? .green : .orange)
 
             Text("EPS Preview")
                 .font(.title).bold()
 
-            if ghostscriptInstalled {
+            if installed {
                 Text("Ready to go. Select any .eps / .ps file in Finder and press **Space** "
                      + "to preview it — icons will show the real thumbnail too.")
                     .multilineTextAlignment(.center)

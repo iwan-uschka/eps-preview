@@ -7,9 +7,6 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 QUICKLOOK_ID=com.zhangyanbo.EPSPreview.QuickLook
 THUMBNAIL_ID=com.zhangyanbo.EPSPreview.Thumbnail
 
-[ -d "$DEST" ] || {
-  echo "EPS Preview is not installed ($DEST not found) — nothing to remove."; exit 0; }
-
 wait_until() {
   local timeout="$1"; shift
   local waited=0
@@ -22,10 +19,17 @@ wait_until() {
 extension_gone() { [ -z "$(pluginkit -m -i "$1" 2>/dev/null)" ]; }
 
 killall EPSPreview >/dev/null 2>&1 || true
-pluginkit -r "$DEST/Contents/PlugIns/EPSQuickLook.appex" >/dev/null 2>&1 || true
-pluginkit -r "$DEST/Contents/PlugIns/EPSThumbnail.appex" >/dev/null 2>&1 || true
-"$LSREGISTER" -u "$DEST" >/dev/null 2>&1 || true
-rm -rf "$DEST"
+# The path-based steps need the bundle. When it is already gone (dragged to
+# the Trash, or an earlier uninstall was interrupted), still clean up the
+# containers, restart the agents and report any registration left behind.
+if [ -d "$DEST" ]; then
+  pluginkit -r "$DEST/Contents/PlugIns/EPSQuickLook.appex" >/dev/null 2>&1 || true
+  pluginkit -r "$DEST/Contents/PlugIns/EPSThumbnail.appex" >/dev/null 2>&1 || true
+  "$LSREGISTER" -u "$DEST" >/dev/null 2>&1 || true
+  rm -rf "$DEST"
+else
+  echo "note: $DEST not found — cleaning up any leftovers."
+fi
 rm -rf "$HOME/Library/Containers/com.zhangyanbo.EPSPreview"* 2>/dev/null || true
 
 killall com.apple.quicklook.ThumbnailsAgent >/dev/null 2>&1 || true
@@ -36,7 +40,10 @@ killall Finder >/dev/null 2>&1 || true
 DEREGISTERED=1
 for id in "$QUICKLOOK_ID" "$THUMBNAIL_ID"; do
   wait_until 10 extension_gone "$id" || {
-    echo "  ⚠️  $id is still registered with PluginKit"
+    # Matching is by identifier only, so name the path: a dev build with the
+    # same identifiers registered elsewhere keeps the ID listed.
+    echo "  ⚠️  $id is still registered with PluginKit:"
+    pluginkit -m -v -i "$id" 2>/dev/null | sed 's/^/       /' || true
     DEREGISTERED=0; }
 done
 

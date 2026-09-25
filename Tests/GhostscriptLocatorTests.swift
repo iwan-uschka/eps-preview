@@ -213,6 +213,36 @@ final class GhostscriptLocatorTests: XCTestCase {
             NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString))
     }
 
+    func testRootAcceptsAConsoleUserOwnedBinaryWithASafeMode() {
+        // Reproduces `sudo scripts/install.sh` against a Homebrew gs owned by
+        // the console user (uid 501), not root — must not be rejected just
+        // because the acting uid (root) differs from the owner.
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 0, mode: 0o755))
+    }
+
+    func testRootStillRejectsAWorldWritableBinaryRegardlessOfOwner() {
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 0, mode: 0o777))
+    }
+
+    func testNonRootStillRejectsAThirdPartyOwnedBinary() {
+        // Unchanged pre-existing behaviour: a same-uid attacker is the threat
+        // this guards against for an ordinary (non-root) caller.
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(owner: 999, currentUID: 501, mode: 0o755))
+    }
+
+    func testNonRootAcceptsItsOwnSafeBinary() {
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 501, mode: 0o755))
+    }
+
+    func testOnlyGroupAndWorldWriteBitsDisqualifyAMode() {
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o755))
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o700))
+        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o555))
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o775), "group-writable")
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o757), "world-writable")
+        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o777))
+    }
+
     // MARK: - Sandbox-safe presence check (host app's status window)
 
     func testPresenceCheckAcceptsAnOwnerOnlyWritableCandidate() throws {
@@ -250,33 +280,19 @@ final class GhostscriptLocatorTests: XCTestCase {
             [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString, path]))
     }
 
-    func testRootAcceptsAConsoleUserOwnedBinaryWithASafeMode() {
-        // Reproduces `sudo scripts/install.sh` against a Homebrew gs owned by
-        // the console user (uid 501), not root — must not be rejected just
-        // because the acting uid (root) differs from the owner.
-        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 0, mode: 0o755))
-    }
-
-    func testRootStillRejectsAWorldWritableBinaryRegardlessOfOwner() {
-        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 0, mode: 0o777))
-    }
-
-    func testNonRootStillRejectsAThirdPartyOwnedBinary() {
-        // Unchanged pre-existing behaviour: a same-uid attacker is the threat
-        // this guards against for an ordinary (non-root) caller.
-        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(owner: 999, currentUID: 501, mode: 0o755))
-    }
-
-    func testNonRootAcceptsItsOwnSafeBinary() {
-        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(owner: 501, currentUID: 501, mode: 0o755))
-    }
-
-    func testOnlyGroupAndWorldWriteBitsDisqualifyAMode() {
-        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o755))
-        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o700))
-        XCTAssertTrue(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o555))
-        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o775), "group-writable")
-        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o757), "world-writable")
-        XCTAssertFalse(GhostscriptLocator.isWritableOnlyByOwner(mode: 0o777))
+    func testPresenceCheckRejectsADirectoryAtTheCandidatePath() throws {
+        // A directory named `gs` passes the existence and ownership checks, but
+        // the render service would never accept it as an executable.
+        let parent = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gs-vetting-" + UUID().uuidString)
+        let directory = parent.appendingPathComponent("gs")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                              ofItemAtPath: directory.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                              ofItemAtPath: parent.path)
+        XCTAssertTrue(GhostscriptLocator.hasTrustworthyOwnership(directory.path))
+        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent([directory.path]))
     }
 }

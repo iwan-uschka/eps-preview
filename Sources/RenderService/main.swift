@@ -21,7 +21,8 @@ final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
     }
 
     /// Restricts connections to processes that are part of *this same app
-    /// bundle* (the Host app and its two Quick Look extensions).
+    /// bundle* — in practice the two Quick Look extensions, each of which embeds
+    /// its own copy of this service (the host app never connects).
     ///
     /// Release builds are ad-hoc signed (no Apple Developer Team ID), so we
     /// can't pin to a shared Team ID the way a notarized app would. Instead

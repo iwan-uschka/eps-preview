@@ -36,6 +36,11 @@ assert_embedded_service() {
 assert_embedded_service EPSQuickLook.appex
 assert_embedded_service EPSThumbnail.appex
 
+# Verify the build-tree bundle before anything destructive, so a bad build
+# can never replace a working install in /Applications.
+codesign --verify --deep --strict "$APP" || {
+  echo "error: signature invalid at $APP — rebuild with: bash scripts/build.sh"; exit 1; }
+
 # Poll for the observable condition instead of guessing a sleep duration —
 # LaunchServices/PluginKit take arbitrarily long on a loaded machine.
 wait_until() {

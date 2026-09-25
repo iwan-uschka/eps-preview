@@ -122,6 +122,9 @@ bash scripts/test-ghostscript-check.sh           # installer vetting, plain bash
 bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
 bash scripts/test-githooks.sh                    # the git hooks' own logic
 bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own logic
+bash scripts/test-refresh-thumbnails.sh          # refresh-thumbnails.sh's qlmanage failure path
+bash scripts/test-package-release.sh             # package-release.sh's version validation
+bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.yml vs built bundles
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
@@ -153,7 +156,10 @@ pre-push hooks against throwaway repos and stubbed tools, and
 `scripts/test-make-scripts.sh` pins `make_install.sh`/`make_uninstall.sh`'s
 refusal to run as root, their delegation to `build.sh`/`install.sh`/
 `uninstall.sh` otherwise, and `make_test.sh`'s refusal to run without
-`xcodegen` on `PATH`.
+`xcodegen` on `PATH`; `scripts/test-refresh-thumbnails.sh` pins
+`refresh-thumbnails.sh` stopping before any restart when `qlmanage` fails, and
+`scripts/test-package-release.sh` pins `package-release.sh` rejecting a
+non-`MAJOR.MINOR.PATCH` version before it builds anything.
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,

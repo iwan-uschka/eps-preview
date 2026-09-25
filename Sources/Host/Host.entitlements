@@ -2,8 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- The host app only shows a status window — it reads no user files,
-         opens no connections and renders nothing itself. -->
+    <!-- The host app only shows a status window. It is sandboxed with no extra
+         entitlements: the only filesystem access is the metadata-only
+         presence check in GhostscriptLocator.isLikelyInstalled(), which the
+         sandbox permits. It must never exec gs; that is the unsandboxed
+         render service's job. -->
     <key>com.apple.security.app-sandbox</key>
     <true/>
 </dict>

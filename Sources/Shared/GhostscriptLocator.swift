@@ -2,8 +2,8 @@ import Foundation
 
 /// Finds the Ghostscript interpreter and builds the environment it may run
 /// with. Shared so the render service (which executes `gs`) and the host app
-/// (which only reports whether a usable `gs` exists) can never disagree about
-/// what counts as an installed Ghostscript.
+/// (which can only check for a probable `gs` from inside its sandbox, see
+/// `isLikelyInstalled()`) draw on the same candidate list and ownership rules.
 ///
 /// Ghostscript is located in this order:
 ///   1. a self-contained copy bundled in the host app's `Contents/Helpers/gs`
@@ -104,8 +104,11 @@ enum GhostscriptLocator {
     /// so a test can point it at files whose existence and permissions it
     /// controls, rather than at whatever `gs` the build machine happens to have.
     static func anySystemCandidateIsPresent(_ candidates: [String]) -> Bool {
-        candidates.contains {
-            FileManager.default.fileExists(atPath: $0) && hasTrustworthyOwnership($0)
+        candidates.contains { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && !isDirectory.boolValue
+                && hasTrustworthyOwnership(path)
         }
     }
 
