@@ -1,4 +1,5 @@
 import Foundation
+import os
 import PDFKit
 import QuickLookThumbnailing
 
@@ -7,23 +8,37 @@ import QuickLookThumbnailing
 /// Quick Look hands us.
 final class ThumbnailProvider: QLThumbnailProvider {
 
+    private static let log = Logger(subsystem: BundleIdentifiers.app,
+                                    category: "thumbnail")
+
     override func provideThumbnail(for request: QLFileThumbnailRequest,
                                    _ handler: @escaping (QLThumbnailReply?, Error?) -> Void) {
-        RenderClient.render(fileURL: request.fileURL) { data, interpolate, errorMessage in
-            func fail(_ message: String) {
-                handler(nil, NSError(domain: BundleIdentifiers.app, code: 1,
-                                     userInfo: [NSLocalizedDescriptionKey: message]))
+        RenderClient.render(fileURL: request.fileURL) { result in
+            func fail(_ failure: RenderFailure, _ reason: String) {
+                Self.log.error("Thumbnail failed: \(reason, privacy: .public)")
+                handler(nil, failure.nsError)
             }
 
-            guard let data,
-                  let document = PDFDocument(data: data),
+            let output: RenderOutput
+            switch result {
+            case .success(let value):
+                output = value
+            case .failure(let failure):
+                handler(nil, failure.nsError)
+                return
+            }
+
+            guard let document = PDFDocument(data: output.pdf),
                   let firstPage = document.page(at: 0) else {
-                fail(errorMessage ?? "Thumbnail render failed")
+                fail(.malformedInput, "rendered PDF has no usable first page")
                 return
             }
 
             let pageSize = PDFPageGeometry.displaySize(of: firstPage)
-            guard pageSize.width > 0, pageSize.height > 0 else { fail("Empty page"); return }
+            guard pageSize.width > 0, pageSize.height > 0 else {
+                fail(.malformedInput, "first page has an empty display box")
+                return
+            }
 
             let layout = ThumbnailGeometry.layout(pageSize: pageSize,
                                          maximumSize: request.maximumSize,
@@ -31,6 +46,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
             let pageRect = layout.pageRect
 
             let scale = request.scale
+            let interpolate = output.wantsInterpolation
 
             handler(QLThumbnailReply(contextSize: layout.contextSize) { context in
                 // The block runs after this method returns and PDFPage refers

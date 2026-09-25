@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Shared with RenderService (Sources/Shared is compiled into every target,
 /// including RenderService) so client and service cannot drift apart.
@@ -36,14 +37,27 @@ enum RenderLimits {
         (maxInFlightRenders + maxConcurrentRenders - 1) / maxConcurrentRenders
 
     /// The client outwaits the service's whole worst case — queue wait
-    /// included — by half a render budget, so the service's specific message
-    /// wins whenever it does answer. A proportion rather than a fixed few
-    /// seconds: the margin has to cover the service's own SIGTERM→SIGKILL
-    /// grace *and* marshalling a reply that may be `maxOutputBytes` large
-    /// across XPC on a loaded machine — otherwise a slow transfer turns a
-    /// successful render into a generic "did not respond" at the client.
+    /// included — by half a render budget, so the service's specific
+    /// `RenderFailure` wins whenever it does arrive, rather than being
+    /// flattened into the client's own `.timedOut`. A proportion rather than
+    /// a fixed few seconds: the margin has to cover the service's own
+    /// SIGTERM→SIGKILL grace *and* marshalling a reply that may be
+    /// `maxOutputBytes` large across XPC on a loaded machine — otherwise a
+    /// slow transfer turns a successful render into a spurious timeout at the
+    /// client.
     static let clientDeadline: TimeInterval =
         renderTimeout * (TimeInterval(worstCaseRenderWaves) + 0.5)
+}
+
+/// A finished render.
+///
+/// `wantsInterpolation` is read from the *source* EPS rather than from the
+/// PDF, because Ghostscript drops the `/Interpolate` flag when writing one.
+/// It mirrors the source's intent so cellular-automata / pixel figures stay
+/// crisp while images that explicitly ask for interpolation are smoothed.
+struct RenderOutput {
+    let pdf: Data
+    let wantsInterpolation: Bool
 }
 
 /// Thin client used by both extensions to talk to the embedded
@@ -52,72 +66,90 @@ enum RenderLimits {
 /// lifecycle trivial.
 enum RenderClient {
 
-    /// Result handed back to the extensions.
-    /// - `pdf`: the rendered PDF bytes (nil on failure)
-    /// - `interpolate`: whether embedded raster images should be drawn with
-    ///   smoothing. This mirrors the source's intent (see `wantsInterpolation`)
-    ///   so cellular-automata / pixel figures stay crisp while images that
-    ///   explicitly ask for interpolation are smoothed.
-    /// - `error`: human-readable message on failure
+    private static let log = Logger(subsystem: BundleIdentifiers.app,
+                                    category: "render-client")
+
+    /// `completion` runs here: serial, off the caller's queue, and never
+    /// inline. Callers that touch UI still have to hop to the main queue.
+    private static let callbackQueue = DispatchQueue(
+        label: BundleIdentifiers.app + ".RenderClient.callback")
+
+    /// Renders `fileURL` to PDF through the embedded render service.
+    ///
+    /// `completion` is called exactly once and *always* asynchronously on
+    /// `callbackQueue`, including for the failures decided here before any
+    /// XPC message is sent. Callers therefore never have to guard against it
+    /// running re-entrantly inside this call.
     static func render(fileURL: URL,
-                       completion: @escaping (_ pdf: Data?, _ interpolate: Bool, _ error: String?) -> Void) {
+                       completion: @escaping (Result<RenderOutput, RenderFailure>) -> Void) {
+        func fail(_ failure: RenderFailure) {
+            callbackQueue.async { completion(.failure(failure)) }
+        }
+
         let scoped = fileURL.startAccessingSecurityScopedResource()
+        defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
 
         // Reject oversized inputs from the file's metadata, before reading any
         // bytes — otherwise the cap in RenderService only fires after we've
-        // already paid the read + scan + XPC cost for the whole file.
+        // already paid the read + scan cost for the whole file.
         if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
            size > RenderLimits.maxInputBytes {
-            if scoped { fileURL.stopAccessingSecurityScopedResource() }
-            let limitMB = RenderLimits.maxInputBytes / (1024 * 1024)
-            completion(nil, false, "EPS file exceeds the \(limitMB) MB preview size limit.")
+            fail(.inputTooLarge)
             return
         }
 
-        let epsData: Data?
+        let interpolate: Bool
         do {
-            epsData = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            // Mapped rather than copied, and scoped to this block: the only
+            // thing the extension needs the bytes for is the interpolation
+            // scan. Ghostscript reads them through the descriptor below.
+            let epsData = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            guard !epsData.isEmpty else {
+                fail(.inputUnreadable)
+                return
+            }
+            interpolate = wantsInterpolation(epsData)
         } catch {
-            if scoped { fileURL.stopAccessingSecurityScopedResource() }
-            completion(nil, false, "Could not read EPS file: \(error.localizedDescription)")
-            return
-        }
-        if scoped { fileURL.stopAccessingSecurityScopedResource() }
-
-        guard let data = epsData, !data.isEmpty else {
-            completion(nil, false, "EPS file is empty or unreadable.")
+            log.error("Could not read EPS file: \(error.localizedDescription, privacy: .private)")
+            fail(.inputUnreadable)
             return
         }
 
-        // Decide interpolation from the *source*, because Ghostscript drops
-        // the /Interpolate flag when writing the PDF.
-        let interpolate = wantsInterpolation(data)
+        let input: FileHandle
+        do {
+            input = try FileHandle(forReadingFrom: fileURL)
+        } catch {
+            log.error("Could not open EPS file: \(error.localizedDescription, privacy: .private)")
+            fail(.inputUnreadable)
+            return
+        }
 
         let connection = NSXPCConnection(serviceName: BundleIdentifiers.renderService)
         connection.remoteObjectInterface = NSXPCInterface(with: RenderProtocol.self)
 
         let didFinish = Atomic(false)
         let deadlineBox = Atomic<DispatchWorkItem?>(nil)
-        func finish(_ pdf: Data?, _ error: String?) {
+        func finish(_ result: Result<RenderOutput, RenderFailure>) {
             if didFinish.swap(true) { return }
             deadlineBox.swap(nil)?.cancel()
-            completion(pdf, interpolate, error)
             connection.invalidate()
+            callbackQueue.async { completion(result) }
         }
 
         // Without these, a service that accepts the connection and then dies
         // or never answers leaves `completion` uncalled forever — the Quick
         // Look panel spins and the connection leaks.
         connection.interruptionHandler = {
-            finish(nil, "The render service stopped unexpectedly.")
+            log.error("Render service stopped unexpectedly")
+            finish(.failure(.serviceUnavailable))
         }
         connection.invalidationHandler = {
-            finish(nil, "The render service is unavailable.")
+            finish(.failure(.serviceUnavailable))
         }
 
         let deadline = DispatchWorkItem {
-            finish(nil, "The render service did not respond within "
-                + "\(Int(RenderLimits.clientDeadline))s.")
+            log.error("Render service did not answer within \(Int(RenderLimits.clientDeadline), privacy: .public)s")
+            finish(.failure(.timedOut))
         }
         deadlineBox.store(deadline)
         DispatchQueue.global().asyncAfter(deadline: .now() + RenderLimits.clientDeadline,
@@ -126,21 +158,29 @@ enum RenderClient {
         connection.resume()
 
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-            finish(nil, "Render service connection failed: \(error.localizedDescription)")
+            log.error("Render service connection failed: \(error.localizedDescription, privacy: .public)")
+            finish(.failure(.serviceUnavailable))
         } as? RenderProtocol
 
         guard let proxy else {
-            finish(nil, "Could not reach the render service.")
+            finish(.failure(.serviceUnavailable))
             return
         }
 
-        proxy.renderEPSToPDF(epsData: data) { pdf, error in
-            finish(pdf, error)
+        proxy.renderEPSToPDF(input: input) { pdf, code in
+            try? input.close()
+            guard let pdf, !pdf.isEmpty else {
+                finish(.failure(RenderFailure(xpcCode: code)))
+                return
+            }
+            finish(.success(RenderOutput(pdf: pdf, wantsInterpolation: interpolate)))
         }
     }
 
+    // MARK: - Interpolation intent
+
     /// Returns true only if the EPS *explicitly* asks for image interpolation
-    /// (`Interpolate true` in the PostScript image dictionary).
+    /// (`Interpolate true` in a PostScript image dictionary).
     ///
     /// PostScript/PDF default for `Interpolate` is **false** (nearest-neighbour),
     /// which is what scientific raster figures (cellular automata, heatmaps,
@@ -148,21 +188,131 @@ enum RenderClient {
     /// token — or `Interpolate false` — means "do not smooth". We only smooth
     /// when the source opted in.
     ///
-    /// The scan is byte-based (Latin-1 maps every byte 1:1, never fails), so it
-    /// works on binary DOS-EPS files whose PostScript body is still ASCII.
+    /// Scanned as raw bytes rather than as a decoded string: the input is up
+    /// to `RenderLimits.maxInputBytes`, and decoding it — twice, to lowercase
+    /// it — to answer one boolean was the largest allocation on the preview
+    /// path. Bytes also mean a binary DOS-EPS file, whose PostScript body is
+    /// ASCII but whose preview section is not, needs no special case.
+    ///
+    /// The whole buffer is scanned rather than a leading window, because
+    /// `/Interpolate` lives in the image dictionary — i.e. wherever in the
+    /// page body the raster happens to be drawn — and a wrong answer is
+    /// invisible (blurry instead of crisp, never an error). One
+    /// allocation-free pass over mapped bytes costs a fraction of the
+    /// Ghostscript run it precedes.
     static func wantsInterpolation(_ data: Data) -> Bool {
-        guard let text = String(data: data, encoding: .isoLatin1)?.lowercased() else {
-            return false
+        data.withUnsafeBytes { raw in
+            scanForInterpolateTrue(raw.bindMemory(to: UInt8.self))
         }
-        var searchStart = text.startIndex
-        while let range = text.range(of: "interpolate", range: searchStart..<text.endIndex) {
-            let rest = text[range.upperBound...].drop {
-                $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r"
+    }
+
+    private static let interpolateToken = Array("interpolate".utf8)
+    private static let trueToken = Array("true".utf8)
+
+    private static func scanForInterpolateTrue(_ bytes: UnsafeBufferPointer<UInt8>) -> Bool {
+        var index = 0
+        while index < bytes.count {
+            switch bytes[index] {
+            case UInt8(ascii: "%"):
+                index = endOfLine(bytes, from: index)
+            case UInt8(ascii: "("):
+                index = endOfStringLiteral(bytes, from: index)
+            default:
+                guard matchesToken(interpolateToken, bytes, at: index) else {
+                    index += 1
+                    continue
+                }
+                let value = index + interpolateToken.count
+                if matchesToken(trueToken, bytes, at: skippingSeparators(bytes, from: value)) {
+                    return true
+                }
+                index = value
             }
-            if rest.hasPrefix("true") { return true }
-            searchStart = range.upperBound
         }
         return false
+    }
+
+    /// Matches a whole PostScript token, case-insensitively. The boundary
+    /// checks are what keep `/Interpolate` from also matching inside
+    /// `/MyInterpolateHack`, and `Interpolatetrue` from reading as a request
+    /// to smooth. `| 0x20` lowercases only letters — no other byte maps into
+    /// the lowercase-letter range, and every token here is lowercase ASCII.
+    private static func matchesToken(_ token: [UInt8],
+                                     _ bytes: UnsafeBufferPointer<UInt8>,
+                                     at index: Int) -> Bool {
+        guard index + token.count <= bytes.count else { return false }
+        if index > 0, !isSeparator(bytes[index - 1]) { return false }
+        for offset in 0..<token.count where bytes[index + offset] | 0x20 != token[offset] {
+            return false
+        }
+        let after = index + token.count
+        return after == bytes.count || isSeparator(bytes[after])
+    }
+
+    /// PostScript's own token separators: the six white-space characters plus
+    /// the self-delimiting ones (PLRM 3.1).
+    private static func isSeparator(_ byte: UInt8) -> Bool {
+        switch byte {
+        case 0x00, 0x09, 0x0A, 0x0C, 0x0D, 0x20:
+            return true
+        case UInt8(ascii: "("), UInt8(ascii: ")"),
+             UInt8(ascii: "<"), UInt8(ascii: ">"),
+             UInt8(ascii: "["), UInt8(ascii: "]"),
+             UInt8(ascii: "{"), UInt8(ascii: "}"),
+             UInt8(ascii: "/"), UInt8(ascii: "%"):
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// White space and comments may both sit between the key and its value,
+    /// so `/Interpolate % why not\n true` still counts.
+    private static func skippingSeparators(_ bytes: UnsafeBufferPointer<UInt8>,
+                                           from start: Int) -> Int {
+        var index = start
+        while index < bytes.count {
+            switch bytes[index] {
+            case 0x00, 0x09, 0x0A, 0x0C, 0x0D, 0x20:
+                index += 1
+            case UInt8(ascii: "%"):
+                index = endOfLine(bytes, from: index)
+            default:
+                return index
+            }
+        }
+        return index
+    }
+
+    private static func endOfLine(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int) -> Int {
+        var index = start
+        while index < bytes.count, bytes[index] != 0x0A, bytes[index] != 0x0D {
+            index += 1
+        }
+        return index
+    }
+
+    /// Skips a `(…)` string literal — nestable, with `\` escaping whatever
+    /// follows — so a figure that merely *draws* the word "Interpolate true"
+    /// as text is not mistaken for one that sets the flag.
+    private static func endOfStringLiteral(_ bytes: UnsafeBufferPointer<UInt8>,
+                                           from start: Int) -> Int {
+        var index = start + 1
+        var depth = 1
+        while index < bytes.count, depth > 0 {
+            switch bytes[index] {
+            case UInt8(ascii: "\\"):
+                index += 1
+            case UInt8(ascii: "("):
+                depth += 1
+            case UInt8(ascii: ")"):
+                depth -= 1
+            default:
+                break
+            }
+            index += 1
+        }
+        return index
     }
 }
 

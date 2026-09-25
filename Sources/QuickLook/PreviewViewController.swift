@@ -53,10 +53,20 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     func preparePreviewOfFile(at url: URL,
                               completionHandler handler: @escaping (Error?) -> Void) {
-        RenderClient.render(fileURL: url) { [weak self] data, interpolate, errorMessage in
+        RenderClient.render(fileURL: url) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if let data, let document = PDFDocument(data: data) {
+                // `handler(nil)` either way: its error argument tells Quick Look
+                // that no preview is available, which drops this view
+                // controller — and the message the label below shows — for a
+                // generic placeholder.
+                switch result {
+                case .success(let output):
+                    guard let document = PDFDocument(data: output.pdf) else {
+                        self.show(.malformedInput)
+                        handler(nil)
+                        return
+                    }
                     // Paging rule (single page vs scrolling with page breaks)
                     // lives in PreviewPageLayout so it can be tested directly.
                     let layout = PreviewPageLayout.displayMode(forPageCount: document.pageCount)
@@ -65,23 +75,26 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                     // Honor the source's interpolation intent: nearest-neighbour
                     // by default (keeps pixel figures crisp), smoothing only when
                     // the EPS explicitly asked for it.
-                    self.pdfView.interpolationQuality = interpolate ? .high : .none
+                    self.pdfView.interpolationQuality = output.wantsInterpolation ? .high : .none
                     self.pdfView.document = document
                     self.pdfView.isHidden = false
                     self.errorLabel.isHidden = true
                     handler(nil)
-                } else {
-                    // The reason (e.g. Ghostscript missing) is surfaced in the
-                    // panel itself, and the handler still reports no error: its
-                    // error argument tells Quick Look that no preview is
-                    // available, which drops this view controller — and the
-                    // message we just put in it — for a generic placeholder.
-                    self.pdfView.isHidden = true
-                    self.errorLabel.stringValue = errorMessage ?? "Could not render this EPS file."
-                    self.errorLabel.isHidden = false
+                case .failure(let failure):
+                    self.show(failure)
                     handler(nil)
                 }
             }
         }
+    }
+
+    /// Only `RenderFailure`'s own text is shown. Ghostscript's diagnostics
+    /// are derived from the previewed file, and this panel is drawn by the
+    /// system — text an EPS author chose has no business appearing there as
+    /// if macOS had written it.
+    private func show(_ failure: RenderFailure) {
+        pdfView.isHidden = true
+        errorLabel.stringValue = failure.message
+        errorLabel.isHidden = false
     }
 }

@@ -24,11 +24,11 @@ EPSPreview.app
 └── RenderService.xpc     UNSANDBOXED helper, embedded in each extension
 ```
 
-The sandboxed extensions hand an EPS path to the embedded, **unsandboxed**
-`RenderService`, which runs your system **Ghostscript** (`gs`) to convert it
-to PDF and returns the bytes. The extension then displays the PDF with
-PDFKit. Because the render happens in the unsandboxed helper, there are no
-sandbox gymnastics around executing `gs` or reading files.
+The sandboxed extensions open the EPS read-only and hand that descriptor
+(never the path) to the embedded, **unsandboxed** `RenderService`, which runs
+your system **Ghostscript** (`gs`) to convert it to PDF and returns the bytes.
+The extension then displays the PDF with PDFKit. Because the render happens in
+the unsandboxed helper, there are no sandbox gymnastics around executing `gs`.
 
 A build from source does **not** bundle Ghostscript — it uses the copy you
 install via Homebrew. That keeps this project small and MIT-licensed, and

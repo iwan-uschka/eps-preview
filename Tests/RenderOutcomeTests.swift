@@ -61,7 +61,7 @@ final class RenderOutcomeTests: XCTestCase {
         let result = RenderOutcome.result(for: exited(0), errorOutput: Data(), outputPath: path)
 
         XCTAssertEqual(result.pdf, pdf)
-        XCTAssertNil(result.error)
+        XCTAssertNil(result.failure)
     }
 
     // MARK: - Timeout
@@ -72,9 +72,7 @@ final class RenderOutcomeTests: XCTestCase {
                                           outputPath: outputPath())
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error,
-                       "Ghostscript timed out after \(Int(RenderLimits.renderTimeout))s "
-                           + "and was terminated.")
+        XCTAssertEqual(result.failure, .timedOut)
     }
 
     func testARenderThatFinishedAsTheWatchdogFiredStillCounts() throws {
@@ -88,7 +86,7 @@ final class RenderOutcomeTests: XCTestCase {
         let result = RenderOutcome.result(for: termination, errorOutput: Data(), outputPath: path)
 
         XCTAssertEqual(result.pdf, pdf)
-        XCTAssertNil(result.error)
+        XCTAssertNil(result.failure)
     }
 
     // MARK: - Output size
@@ -99,9 +97,7 @@ final class RenderOutcomeTests: XCTestCase {
                                           outputPath: outputPath())
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error,
-                       "The rendered PDF exceeds the "
-                           + "\(RenderLimits.maxOutputBytes / (1024 * 1024)) MB preview output limit.")
+        XCTAssertEqual(result.failure, .outputTooLarge)
     }
 
     func testAnOversizedOutputFileIsRejected() throws {
@@ -111,9 +107,7 @@ final class RenderOutcomeTests: XCTestCase {
         let result = RenderOutcome.result(for: exited(0), errorOutput: Data(), outputPath: path)
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error,
-                       "The rendered PDF exceeds the "
-                           + "\(RenderLimits.maxOutputBytes / (1024 * 1024)) MB preview output limit.")
+        XCTAssertEqual(result.failure, .outputTooLarge)
     }
 
     func testAFileExactlyAtTheLimitIsStillAccepted() throws {
@@ -123,19 +117,34 @@ final class RenderOutcomeTests: XCTestCase {
         let result = RenderOutcome.result(for: exited(0), errorOutput: Data(), outputPath: path)
 
         XCTAssertEqual(result.pdf?.count, RenderLimits.maxOutputBytes)
-        XCTAssertNil(result.error)
+        XCTAssertNil(result.failure)
     }
 
     // MARK: - Non-zero exit
 
-    func testNonZeroExitCarriesGhostscriptsOwnDiagnostic() {
+    /// The reply is a category, not prose: a caller can tell "this file is
+    /// broken" from "install Ghostscript" without ever being handed text the
+    /// previewed file authored.
+    func testNonZeroExitIsReportedAsAMalformedInput() {
         let stderr = Data("Error: /undefined in --xshow--\n".utf8)
 
         let result = RenderOutcome.result(for: exited(1), errorOutput: stderr, outputPath: outputPath())
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error,
-                       "Ghostscript exited with status 1. Error: /undefined in --xshow--\n")
+        XCTAssertEqual(result.failure, .malformedInput)
+    }
+
+    /// Ghostscript's stderr is derived from the file being rendered. It is
+    /// logged, never returned — nothing in the reply can be chosen by an EPS
+    /// author, because the reply has no room for text at all.
+    func testGhostscriptsOwnDiagnosticNeverReachesTheCaller() {
+        let stderr = Data("Error: /undefined in --xshow--\n".utf8)
+
+        let result = RenderOutcome.result(for: exited(1), errorOutput: stderr, outputPath: outputPath())
+
+        XCTAssertFalse(result.failure?.message.contains("xshow") ?? false,
+                       "the interpreter's own text must not be forwarded to a caller")
+        XCTAssertEqual(result.failure?.message, RenderFailure.malformedInput.message)
     }
 
     func testASignalThatIsNeitherTimeoutNorSizeFallsThroughToTheStatus() {
@@ -146,29 +155,28 @@ final class RenderOutcomeTests: XCTestCase {
                                           outputPath: outputPath())
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error,
-                       "Ghostscript exited with status \(SIGSEGV). Fatal: segmentation fault")
+        XCTAssertEqual(result.failure, .malformedInput)
     }
 
     // MARK: - Missing or empty output
 
-    func testSuccessWithNoOutputFileIsReportedAsNoOutput() {
+    func testSuccessWithNoOutputFileIsReportedAsAMalformedInput() {
         let result = RenderOutcome.result(for: exited(0),
                                           errorOutput: Data(),
                                           outputPath: outputPath("never-written.pdf"))
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error, "Ghostscript reported success but produced no PDF output.")
+        XCTAssertEqual(result.failure, .malformedInput)
     }
 
-    func testSuccessWithAnEmptyOutputFileIsReportedAsNoOutput() throws {
+    func testSuccessWithAnEmptyOutputFileIsReportedAsAMalformedInput() throws {
         let path = outputPath()
         try write(Data(), to: path)
 
         let result = RenderOutcome.result(for: exited(0), errorOutput: Data(), outputPath: path)
 
         XCTAssertNil(result.pdf)
-        XCTAssertEqual(result.error, "Ghostscript reported success but produced no PDF output.")
+        XCTAssertEqual(result.failure, .malformedInput)
     }
 
     // MARK: - Diagnostics
