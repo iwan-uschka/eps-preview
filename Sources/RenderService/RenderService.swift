@@ -13,7 +13,7 @@ import os
 /// Where Ghostscript comes from is `GhostscriptLocator`'s job.
 final class RenderService: NSObject, RenderProtocol {
 
-    private static let log = Logger(subsystem: "com.zhangyanbo.EPSPreview.RenderService",
+    private static let log = Logger(subsystem: BundleIdentifiers.renderService,
                                     category: "render")
 
     /// Finder asks for a whole folder of thumbnails at once, and every render
