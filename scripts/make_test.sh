@@ -29,6 +29,10 @@ echo "── Bundled-library manifest tests ──"
 bash scripts/test-ghostscript-manifest.sh
 
 echo
+echo "── Third-party license manifest tests ──"
+bash scripts/test-ghostscript-thirdparty.sh
+
+echo
 echo "── Git hooks tests ──"
 bash scripts/test-githooks.sh
 
