@@ -12,6 +12,8 @@ dist/
 
 # Local agent state
 .claude/
+.sandcastle/patches/
+.sandcastle/worktrees/
 
 # Audit scratch files (may quote local infrastructure details — never track)
 PROBE.md

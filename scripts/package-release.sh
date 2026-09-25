@@ -54,40 +54,22 @@ echo "  ✓ signature valid"
 # product depends on: host app sandboxed (it was just re-signed above),
 # extensions sandboxed (or macOS won't register them),
 # render service unsandboxed (or it can't exec Ghostscript).
-assert_sandbox_state() {
-  local want="$1" path="$2" ents state
-  # A missing bundle would otherwise read as `absent` and pass vacuously.
-  [ -e "$path" ] || { echo "error: no bundle at $path"; exit 1; }
-  ents="$(mktemp)"
-  codesign -d --entitlements :- --xml "$path" >"$ents" 2>/dev/null || true
-  state="$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.app-sandbox" "$ents" 2>/dev/null)" \
-    || state="absent"
-  rm -f "$ents"
-  [ "$state" = "$want" ] || {
-    echo "error: com.apple.security.app-sandbox is '$state' on $path (expected '$want')"
-    exit 1; }
-}
+# shellcheck source=lib/signature-checks.sh disable=SC1091
+. "$ROOT/scripts/lib/signature-checks.sh"
 assert_sandbox_state true   "$APP"
 assert_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
 assert_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
 assert_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
 # The host no longer embeds the render service; check the path is gone rather
-# than asserting `absent` on it, which the guard above would reject.
+# than asserting `absent` on it, which assert_sandbox_state's missing-bundle
+# guard would reject.
 [ ! -e "$APP/Contents/XPCServices/RenderService.xpc" ] || {
   echo "error: host app still embeds Contents/XPCServices/RenderService.xpc"; exit 1; }
 echo "  ✓ entitlements as expected"
 
 # The re-seal above must not drop the hardened runtime build.sh signed with;
-# the render service's peer check depends on it. Output is captured rather
-# than piped into `grep -q`, which under pipefail could fail on SIGPIPE.
-assert_hardened_runtime() {
-  local path="$1" info
-  info="$(codesign -dv "$path" 2>&1)" || {
-    echo "error: cannot read code signature of $path"; exit 1; }
-  [[ "$info" =~ flags=[^$'\n']*runtime ]] || {
-    echo "error: hardened runtime flag missing on $path"; exit 1; }
-}
+# the render service's peer check depends on it.
 assert_hardened_runtime "$APP"
 assert_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex"
 assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex"
@@ -120,23 +102,36 @@ EOF
 
 mkdir -p dist
 DMG="dist/EPSPreview-$VERSION.dmg"
-rm -f "$DMG"
+# Built and verified under a hidden temp name, then moved to $DMG only once
+# every check in step 5 has passed — so a failed run never leaves an image
+# under the release name. The temp name must itself end in .dmg, or
+# `hdiutil create` appends one.
+PARTIAL="dist/.EPSPreview-$VERSION.partial.dmg"
+rm -f "$DMG" "$PARTIAL"
+trap 'rm -f "$PARTIAL"' EXIT
 hdiutil create -volname "EPS Preview" -srcfolder "$STAGE" \
-  -ov -format UDZO "$DMG" >/dev/null
+  -ov -format UDZO "$PARTIAL" >/dev/null
 rm -rf "$(dirname "$STAGE")"
 
 echo
 echo "════ 5/5  Verify DMG ════"
-hdiutil verify "$DMG" >/dev/null || {
-  echo "error: $DMG failed hdiutil verify"; exit 1; }
+hdiutil verify "$PARTIAL" >/dev/null || {
+  echo "error: image for $DMG failed hdiutil verify"; exit 1; }
 echo "  ✓ image checksum valid"
 MOUNT="$(mktemp -d)"
+MOUNTED=0
 cleanup_mount() {
-  hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
+  # Nothing to detach when the attach itself failed; only the mountpoint dir remains.
+  if [ "$MOUNTED" = 1 ]; then
+    hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 \
+      || hdiutil detach "$MOUNT" -force -quiet >/dev/null 2>&1 \
+      || echo "warning: could not detach $MOUNT; run: hdiutil detach '$MOUNT' -force" >&2
+  fi
   rmdir "$MOUNT" 2>/dev/null || true
 }
-trap cleanup_mount EXIT
-hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+trap 'cleanup_mount; rm -f "$PARTIAL"' EXIT
+hdiutil attach "$PARTIAL" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+MOUNTED=1
 codesign --verify --deep --strict "$MOUNT/EPSPreview.app" || {
   echo "error: app signature invalid inside $DMG"; exit 1; }
 CONVERTER="$MOUNT/EPSPreview.app/Contents/Helpers/gs/converter"
@@ -149,6 +144,7 @@ INSTALLED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionStri
 echo "  ✓ app signature valid, Ghostscript bundled, reports $INSTALLED_VERSION"
 cleanup_mount
 trap - EXIT
+mv "$PARTIAL" "$DMG"
 
 echo
 echo "✓ Release built: $DMG ($(du -h "$DMG" | cut -f1))"

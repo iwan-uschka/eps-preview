@@ -45,6 +45,11 @@ containing directory are writable by nobody but their owner. `scripts/install.sh
 applies exactly the same rules, so it cannot report Ghostscript as found for a
 copy every preview would then refuse.
 
+The host app is sandboxed and cannot run `gs`, so its status window only
+checks that a candidate exists with safe ownership. An installed but too-old
+Ghostscript shows as ready there, and previews then fail. `scripts/install.sh`
+reports the full check.
+
 The `RenderService` only accepts XPC connections from processes whose code
 signature is intact and whose executable lives inside the *same*
 `EPSPreview.app` bundle, so an unrelated local process cannot use it to run
@@ -123,8 +128,9 @@ bash scripts/test-ghostscript-manifest.sh        # bundled-library closure gate
 bash scripts/test-githooks.sh                    # the git hooks' own logic
 bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own logic
 bash scripts/test-refresh-thumbnails.sh          # refresh-thumbnails.sh's qlmanage failure path
-bash scripts/test-package-release.sh             # package-release.sh's version validation
-bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.yml vs built bundles
+bash scripts/test-package-release.sh             # package-release.sh's and build.sh's version validation
+bash scripts/test-check-bundle-identifiers.sh    # check-bundle-identifiers.sh's mismatch detection
+bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.yml, install/uninstall scripts, Info.plists and (if built) bundles
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
@@ -159,7 +165,11 @@ refusal to run as root, their delegation to `build.sh`/`install.sh`/
 `xcodegen` on `PATH`; `scripts/test-refresh-thumbnails.sh` pins
 `refresh-thumbnails.sh` stopping before any restart when `qlmanage` fails, and
 `scripts/test-package-release.sh` pins `package-release.sh` rejecting a
-non-`MAJOR.MINOR.PATCH` version before it builds anything.
+non-`MAJOR.MINOR.PATCH` version, and `build.sh` rejecting such an
+`EPS_MARKETING_VERSION`, before either builds anything.
+`scripts/test-check-bundle-identifiers.sh` pins `check-bundle-identifiers.sh`
+failing on each one-sided identifier rename, against mutated throwaway copies
+of the files it reads (it needs `swift` and `PlistBuddy`, so macOS with Xcode).
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,

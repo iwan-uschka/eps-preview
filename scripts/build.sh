@@ -8,6 +8,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Marketing version to stamp into the built bundles; scripts/package-release.sh
+# sets it from its version argument. Unset → keep whatever the source
+# Info.plists declare. Validated before the toolchain checks so a bad value is
+# reported (and testable) without xcodegen or Xcode installed.
+MARKETING_VERSION="${EPS_MARKETING_VERSION:-}"
+if [ -n "$MARKETING_VERSION" ] && ! [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: EPS_MARKETING_VERSION must be MAJOR.MINOR.PATCH (got '$MARKETING_VERSION')"; exit 1
+fi
+
 command -v xcodegen >/dev/null 2>&1 || {
   echo "error: xcodegen not found. Install with: brew install xcodegen"; exit 1; }
 # The Command Line Tools alone ship an xcodebuild stub that fails opaquely
@@ -16,14 +25,6 @@ xcodebuild -version >/dev/null 2>&1 || {
   echo "error: full Xcode required (xcode-select -p → $(xcode-select -p 2>/dev/null))"
   echo "       Install Xcode, then: sudo xcode-select -s /Applications/Xcode.app"
   exit 1; }
-
-# Marketing version to stamp into the built bundles; scripts/package-release.sh
-# sets it from its version argument. Unset → keep whatever the source
-# Info.plists declare.
-MARKETING_VERSION="${EPS_MARKETING_VERSION:-}"
-if [ -n "$MARKETING_VERSION" ] && ! [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: EPS_MARKETING_VERSION must be MAJOR.MINOR.PATCH (got '$MARKETING_VERSION')"; exit 1
-fi
 
 echo "── (1/7) Generating Xcode project ──"
 xcodegen generate
@@ -148,55 +149,34 @@ codesign --verify --deep --strict --verbose=2 "$APP" || {
   echo "error: signature graph invalid for $APP"; exit 1; }
 echo "  ✓ valid"
 
-# --verify says nothing about entitlement *contents*, and the sandbox state is
-# load-bearing in both directions: macOS 15/26 refuse to register an
-# unsandboxed Quick Look extension at all, while a sandboxed RenderService
-# could not exec Ghostscript.
-assert_sandbox_state() {
-  local want="$1" path="$2" ents state
-  # Without this, a missing bundle reads as `absent`: codesign fails, leaves a
-  # 0-byte file, PlistBuddy exits 1 on it and the `|| state="absent"` fallback
-  # below turns that into a *pass*. Every `absent` assertion would then hold
-  # vacuously for a path the build forgot to produce.
-  [ -e "$path" ] || { echo "error: no bundle at $path"; exit 1; }
-  ents="$(mktemp)"
-  codesign -d --entitlements :- --xml "$path" >"$ents" 2>/dev/null || true
-  state="$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.app-sandbox" "$ents" 2>/dev/null)" \
-    || state="absent"
-  rm -f "$ents"
-  [ "$state" = "$want" ] || {
-    echo "error: com.apple.security.app-sandbox is '$state' on $path (expected '$want')"
-    exit 1; }
-  echo "  ✓ app-sandbox $state — ${path#"$APP/"}"
+# --verify says nothing about entitlement contents or the hardened runtime;
+# scripts/lib/signature-checks.sh explains why both are load-bearing.
+# shellcheck source=lib/signature-checks.sh disable=SC1091
+. "$ROOT/scripts/lib/signature-checks.sh"
+check_sandbox_state() {
+  assert_sandbox_state "$1" "$2"
+  echo "  ✓ app-sandbox $1 — ${2#"$APP/"}"
 }
-assert_sandbox_state true   "$APP"
-assert_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
-assert_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
-assert_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
-assert_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
+check_sandbox_state true   "$APP"
+check_sandbox_state true   "$APP/Contents/PlugIns/EPSQuickLook.appex"
+check_sandbox_state true   "$APP/Contents/PlugIns/EPSThumbnail.appex"
+check_sandbox_state absent "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
+check_sandbox_state absent "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
 
-# The hardened runtime is load-bearing for the render service's peer check
-# (see sign() above), and --verify doesn't report it either. Output is
-# captured first rather than piped into `grep -q`, which under pipefail could
-# fail the check through codesign's SIGPIPE instead of a missing flag.
-assert_hardened_runtime() {
-  local path="$1" info
-  info="$(codesign -dv "$path" 2>&1)" || {
-    echo "error: cannot read code signature of $path"; exit 1; }
-  [[ "$info" =~ flags=[^$'\n']*runtime ]] || {
-    echo "error: hardened runtime flag missing on $path"; exit 1; }
-  echo "  ✓ hardened runtime — ${path#"$APP/"}"
+check_hardened_runtime() {
+  assert_hardened_runtime "$1"
+  echo "  ✓ hardened runtime — ${1#"$APP/"}"
 }
-assert_hardened_runtime "$APP"
-assert_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex"
-assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex"
-assert_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
-assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
+check_hardened_runtime "$APP"
+check_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex"
+check_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex"
+check_hardened_runtime "$APP/Contents/PlugIns/EPSQuickLook.appex/Contents/XPCServices/RenderService.xpc"
+check_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc"
 
 # The host embeds no render service of its own — assert the absence directly.
-# `assert_sandbox_state absent` cannot express this: it reports `absent` for a
-# path that is missing entirely just as readily as for one that is present and
-# unsandboxed, so it would pass here whether or not the removal held.
+# `assert_sandbox_state absent` cannot express this: it means "present and
+# unsandboxed", and rejects a path that is missing entirely — the state wanted
+# here.
 [ ! -e "$APP/Contents/XPCServices/RenderService.xpc" ] || {
   echo "error: host app still embeds Contents/XPCServices/RenderService.xpc"
   exit 1; }

@@ -10,7 +10,12 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/eps-refresh-thumbnails-test.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+# INT/TERM must exit, not just clean up: a handler that only deleted $WORK
+# would let the run continue without its stubs and reach the real qlmanage
+# and killall.
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PASSED=0
 FAILED=0

@@ -27,9 +27,9 @@ assert_embedded_service() {
   local appex="$1"
   [ -d "$APP/Contents/PlugIns/$appex/Contents/XPCServices/RenderService.xpc" ] || {
     echo "error: $appex is missing its embedded RenderService.xpc."
-    echo "       This usually means \`xcodebuild ... test\` ran after \`build.sh\` and"
-    echo "       silently stripped it (Xcode's test-phase rebuild only produces the"
-    echo "       app; build.sh is the only thing that re-embeds). Rerun: bash scripts/build.sh"
+    echo "       build.sh is the only step that embeds it — a bare \`xcodebuild\` build"
+    echo "       or an interrupted build.sh leaves the extensions without one."
+    echo "       Rerun: bash scripts/build.sh"
     exit 1
   }
 }
@@ -41,19 +41,16 @@ assert_embedded_service EPSThumbnail.appex
 codesign --verify --deep --strict "$APP" || {
   echo "error: signature invalid at $APP — rebuild with: bash scripts/build.sh"; exit 1; }
 
-# Poll for the observable condition instead of guessing a sleep duration —
-# LaunchServices/PluginKit take arbitrarily long on a loaded machine.
-wait_until() {
-  local timeout="$1"; shift
-  local waited=0
-  while ! "$@"; do
-    [ "$waited" -lt "$((timeout * 4))" ] || return 1
-    sleep 0.25
-    waited=$((waited + 1))
-  done
-}
+# shellcheck source=lib/wait.sh disable=SC1091
+. "$ROOT/scripts/lib/wait.sh"
 processes_gone() { ! pgrep -qx 'EPSPreview|EPSQuickLook|EPSThumbnail|RenderService'; }
-extension_registered() { [ -n "$(pluginkit -m -i "$1" 2>/dev/null)" ]; }
+# Mirror of uninstall.sh's extension_gone: a failing pluginkit or a
+# "(no matches)" placeholder does not count as registered.
+extension_registered() {
+  local out
+  out="$(pluginkit -m -i "$1" 2>/dev/null)" || return 1
+  [ -n "$out" ] && [ "$out" != "(no matches)" ]
+}
 
 echo "── Checking Ghostscript ──"
 # Any rejected candidate explains itself on stderr, above the summary line.
@@ -81,22 +78,32 @@ killall EPSPreview EPSQuickLook EPSThumbnail RenderService >/dev/null 2>&1 || tr
 # serve stale extension code.
 "$LSREGISTER" -u "$APP" >/dev/null 2>&1 || true
 wait_until 10 processes_gone || echo "  ⚠️  EPS Preview processes still running; replacing the bundle anyway"
-rm -rf "$DEST"
-cp -R "$APP" "$DEST"
-xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+# Copy to a staging path next to $DEST and verify it there, so a failed copy
+# (partial write, full disk) never replaces the working install.
+TMP_DEST="$DEST.installing"
+rm -rf "$TMP_DEST"
+cp -R "$APP" "$TMP_DEST"
+xattr -dr com.apple.quarantine "$TMP_DEST" 2>/dev/null || true
 # The render service only talks to peers inside the *same* app bundle, so the
-# signature has to be intact at the installed path, not just in build/.
-codesign --verify --deep --strict "$DEST" || {
-  echo "error: signature invalid at $DEST — rebuild with: bash scripts/build.sh"; exit 1; }
+# signature has to be intact in the installed copy, not just in build/. The
+# same-volume `mv` below is a rename, so it leaves the verified bundle as is.
+codesign --verify --deep --strict "$TMP_DEST" || {
+  rm -rf "$TMP_DEST"
+  echo "error: signature invalid in the copy made for $DEST — rebuild with: bash scripts/build.sh"; exit 1; }
+rm -rf "$DEST"
+mv "$TMP_DEST" "$DEST"
 echo "  ✓ signature valid at $DEST"
 
 echo "── Registering extensions ──"
 "$LSREGISTER" -f -R "$DEST"
 open "$DEST"
+# pluginkit may still hold the record of the bundle just replaced at the same
+# path, so this proves PluginKit knows the identifier, not that it has picked
+# up the new copy; the wording below claims no more than that.
 REGISTERED=1
 for id in "$QUICKLOOK_ID" "$THUMBNAIL_ID"; do
   if wait_until 15 extension_registered "$id"; then
-    echo "  ✓ $id registered"
+    echo "  ✓ $id reported by pluginkit"
   else
     echo "  ⚠️  $id not reported by pluginkit"
     REGISTERED=0

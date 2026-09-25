@@ -171,15 +171,20 @@ final class GhostscriptLocatorTests: XCTestCase {
     /// Creates `<temp>/<uuid>/gs` and returns its path, with both the file and
     /// its containing directory set to the given modes. Owned by this process
     /// either way — a test cannot hand itself a file owned by a third user, so
-    /// only the permission half is driven through a real file.
-    private func candidate(fileMode: Int, directoryMode: Int) throws -> String {
+    /// only the permission half is driven through a real file. With
+    /// `binaryIsDirectory`, `gs` is a directory instead of a file.
+    private func candidate(fileMode: Int, directoryMode: Int, binaryIsDirectory: Bool = false) throws -> String {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("gs-vetting-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
 
         let binary = directory.appendingPathComponent("gs")
-        try Data("#!/bin/sh\n".utf8).write(to: binary)
+        if binaryIsDirectory {
+            try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: false)
+        } else {
+            try Data("#!/bin/sh\n".utf8).write(to: binary)
+        }
         try FileManager.default.setAttributes([.posixPermissions: fileMode],
                                               ofItemAtPath: binary.path)
         try FileManager.default.setAttributes([.posixPermissions: directoryMode],
@@ -283,16 +288,27 @@ final class GhostscriptLocatorTests: XCTestCase {
     func testPresenceCheckRejectsADirectoryAtTheCandidatePath() throws {
         // A directory named `gs` passes the existence and ownership checks, but
         // the render service would never accept it as an executable.
-        let parent = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("gs-vetting-" + UUID().uuidString)
-        let directory = parent.appendingPathComponent("gs")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
-        try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                              ofItemAtPath: directory.path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                              ofItemAtPath: parent.path)
-        XCTAssertTrue(GhostscriptLocator.hasTrustworthyOwnership(directory.path))
-        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent([directory.path]))
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755, binaryIsDirectory: true)
+        XCTAssertTrue(GhostscriptLocator.hasTrustworthyOwnership(path))
+        XCTAssertFalse(GhostscriptLocator.anySystemCandidateIsPresent([path]))
+    }
+
+    private let fakeBundled = GhostscriptLocator.Ghostscript(executablePath: "/bundled/gs", environment: [:])
+
+    func testLikelyInstalledWhenOnlyTheBundledCopyIsPresent() {
+        // A downloaded release with no Homebrew gs must not show the
+        // "brew install ghostscript" warning.
+        XCTAssertTrue(GhostscriptLocator.isLikelyInstalled(bundled: { self.fakeBundled }, candidates: []))
+    }
+
+    func testLikelyInstalledWhenOnlyASystemCandidateIsPresent() throws {
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755)
+        XCTAssertTrue(GhostscriptLocator.isLikelyInstalled(bundled: { nil }, candidates: [path]))
+    }
+
+    func testNotLikelyInstalledWhenNeitherIsPresent() {
+        XCTAssertFalse(GhostscriptLocator.isLikelyInstalled(
+            bundled: { nil },
+            candidates: [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString]))
     }
 }

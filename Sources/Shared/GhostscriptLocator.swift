@@ -96,7 +96,14 @@ enum GhostscriptLocator {
     /// error: it sends the user to `brew install ghostscript` for a package
     /// they already have.
     static func isLikelyInstalled() -> Bool {
-        bundledGhostscript() != nil || anySystemCandidateIsPresent(systemCandidates)
+        isLikelyInstalled(bundled: bundledGhostscript, candidates: systemCandidates)
+    }
+
+    /// `isLikelyInstalled()` with the bundled lookup and the candidate list
+    /// passed in, so a test can cover both halves of the `||` without
+    /// depending on `Bundle.main` or on whatever `gs` the build machine has.
+    static func isLikelyInstalled(bundled: () -> Ghostscript?, candidates: [String]) -> Bool {
+        bundled() != nil || anySystemCandidateIsPresent(candidates)
     }
 
     /// The candidate-scan half of `isLikelyInstalled()`, with the list passed

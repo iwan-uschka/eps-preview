@@ -2,21 +2,22 @@
 # Remove EPS Preview.app and unregister its extensions.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="/Applications/EPSPreview.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 QUICKLOOK_ID=com.zhangyanbo.EPSPreview.QuickLook
 THUMBNAIL_ID=com.zhangyanbo.EPSPreview.Thumbnail
 
-wait_until() {
-  local timeout="$1"; shift
-  local waited=0
-  while ! "$@"; do
-    [ "$waited" -lt "$((timeout * 4))" ] || return 1
-    sleep 0.25
-    waited=$((waited + 1))
-  done
+# shellcheck source=lib/wait.sh disable=SC1091
+. "$ROOT/scripts/lib/wait.sh"
+# Treat "no match" as gone only when pluginkit itself ran successfully (it
+# exits 0 with empty output when nothing matches), and ignore a
+# "(no matches)" placeholder in case some macOS version prints one.
+extension_gone() {
+  local out
+  out="$(pluginkit -m -i "$1" 2>/dev/null)" || return 1
+  [ -z "$out" ] || [ "$out" = "(no matches)" ]
 }
-extension_gone() { [ -z "$(pluginkit -m -i "$1" 2>/dev/null)" ]; }
 
 killall EPSPreview >/dev/null 2>&1 || true
 # The path-based steps need the bundle. When it is already gone (dragged to
