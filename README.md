@@ -56,6 +56,13 @@ containing directory are writable by nobody but their owner. `scripts/install.sh
 applies exactly the same rules, so it cannot report Ghostscript as found for a
 copy every preview would then refuse.
 
+A release build can be told to ignore its own bundled Ghostscript and use a
+system install instead: create an empty file at
+`~/Library/Application Support/EPSPreview/force-system-gs`. This is the
+substitution path Ghostscript's own licensing terms give an ordinary user
+(see [NOTICE.md](NOTICE.md)) — it does not touch the app bundle or its
+signature, and the system copy still goes through the vetting above.
+
 The host app is sandboxed and cannot run `gs`, so its status window only
 checks that a candidate exists with safe ownership. An installed but too-old
 Ghostscript shows as ready there, and previews then fail. `scripts/install.sh`

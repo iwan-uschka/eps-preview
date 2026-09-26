@@ -311,4 +311,19 @@ final class GhostscriptLocatorTests: XCTestCase {
             bundled: { nil },
             candidates: [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString]))
     }
+
+    // MARK: - Forcing a system Ghostscript
+
+    func testForcesSystemGhostscriptWhenTheFlagFileExists() throws {
+        let path = NSTemporaryDirectory() + "force-system-gs-" + UUID().uuidString
+        try Data().write(to: URL(fileURLWithPath: path))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        XCTAssertTrue(GhostscriptLocator.forcesSystemGhostscript(flagPath: path))
+    }
+
+    func testDoesNotForceSystemGhostscriptWhenTheFlagFileIsAbsent() {
+        XCTAssertFalse(GhostscriptLocator.forcesSystemGhostscript(
+            flagPath: NSTemporaryDirectory() + "force-system-gs-does-not-exist-" + UUID().uuidString))
+    }
 }

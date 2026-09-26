@@ -6,6 +6,9 @@ import Foundation
 /// `isLikelyInstalled()`) draw on the same candidate list and ownership rules.
 ///
 /// Ghostscript is located in this order:
+///   0. if `forceSystemGhostscriptFlagPath` exists, skip straight to step 2 —
+///      the substitution path a release build's own bundled, signature-sealed
+///      Ghostscript otherwise has none of (see NOTICE.md).
 ///   1. a self-contained copy bundled in the host app's `Contents/Helpers/gs`
 ///      (used by downloaded release builds — no Homebrew required), then
 ///   2. a system install (Homebrew / MacPorts), for build-from-source users.
@@ -57,7 +60,7 @@ enum GhostscriptLocator {
     private static let resolutionCache = GhostscriptResolutionCache(
         failureTTL: failedResolutionTTL,
         clock: { ProcessInfo.processInfo.systemUptime },
-        resolve: { bundledGhostscript() ?? systemGhostscript() })
+        resolve: { forcesSystemGhostscript() ? systemGhostscript() : (bundledGhostscript() ?? systemGhostscript()) })
 
     /// A successful resolution is cached for the life of the process: it costs
     /// several `stat`s plus a `--version` probe and sits on the path of every
@@ -131,6 +134,31 @@ enum GhostscriptLocator {
         ]
         if let gsLib { environment["GS_LIB"] = gsLib }
         return environment
+    }
+
+    /// A flag file under the user's own `Application Support` directory, not
+    /// an environment variable: `childEnvironment()`'s doc comment explains
+    /// why this type never lets inherited process environment steer a
+    /// security-relevant decision, and which Ghostscript a release build
+    /// trusts is exactly that kind of decision. A file the user places
+    /// deliberately keeps the same trust boundary every other check here
+    /// already draws.
+    private static let forceSystemGhostscriptFlagPath =
+        NSHomeDirectory() + "/Library/Application Support/EPSPreview/force-system-gs"
+
+    /// Whether a release build should skip its bundled, pinned Ghostscript
+    /// and resolve a system install instead — the substitution path
+    /// Ghostscript's own aggregation rules require an ordinary user be able
+    /// to take (see NOTICE.md), since the bundled copy is otherwise chosen
+    /// unconditionally and needs no vetting to run.
+    static func forcesSystemGhostscript() -> Bool {
+        forcesSystemGhostscript(flagPath: forceSystemGhostscriptFlagPath)
+    }
+
+    /// `forcesSystemGhostscript()` with the path passed in, so a test can
+    /// point it at a fixture instead of the real home directory.
+    static func forcesSystemGhostscript(flagPath: String) -> Bool {
+        FileManager.default.fileExists(atPath: flagPath)
     }
 
     /// Looks for a self-contained Ghostscript at `<HostApp>.app/Contents/Helpers/gs/`.
