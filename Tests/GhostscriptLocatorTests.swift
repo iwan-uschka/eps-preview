@@ -312,6 +312,23 @@ final class GhostscriptLocatorTests: XCTestCase {
             candidates: [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString]))
     }
 
+    func testLikelyInstalledIgnoresABundledCopyWhenSystemIsForced() throws {
+        // Forcing a system Ghostscript must not be masked by a bundled copy
+        // that `locate()` itself will skip.
+        let path = try candidate(fileMode: 0o755, directoryMode: 0o755)
+        XCTAssertTrue(GhostscriptLocator.isLikelyInstalled(
+            bundled: { self.fakeBundled }, candidates: [path], forcesSystem: true))
+    }
+
+    func testNotLikelyInstalledWhenSystemIsForcedAndNoSystemCandidateIsPresent() {
+        // The bundled copy is present but forcing is on, so `locate()` returns
+        // nil; the status window must agree rather than reporting it ready.
+        XCTAssertFalse(GhostscriptLocator.isLikelyInstalled(
+            bundled: { self.fakeBundled },
+            candidates: [NSTemporaryDirectory() + "gs-does-not-exist-" + UUID().uuidString],
+            forcesSystem: true))
+    }
+
     // MARK: - Forcing a system Ghostscript
 
     func testForcesSystemGhostscriptWhenTheFlagFileExists() throws {
@@ -325,5 +342,44 @@ final class GhostscriptLocatorTests: XCTestCase {
     func testDoesNotForceSystemGhostscriptWhenTheFlagFileIsAbsent() {
         XCTAssertFalse(GhostscriptLocator.forcesSystemGhostscript(
             flagPath: NSTemporaryDirectory() + "force-system-gs-does-not-exist-" + UUID().uuidString))
+    }
+
+    // MARK: - Resolution ordering (bundled vs. forced system)
+
+    func testResolveGhostscriptSkipsAValidBundledCopyWhenForced() {
+        XCTAssertEqual(
+            GhostscriptLocator.resolveGhostscript(
+                forcesSystem: true,
+                bundled: { self.fakeBundled },
+                system: { self.ghostscript("/opt/homebrew/bin/gs") }
+            )?.executablePath,
+            "/opt/homebrew/bin/gs")
+    }
+
+    func testResolveGhostscriptReturnsNilWhenForcedAndNoSystemCandidateResolves() {
+        XCTAssertNil(GhostscriptLocator.resolveGhostscript(
+            forcesSystem: true,
+            bundled: { self.fakeBundled },
+            system: { nil }))
+    }
+
+    func testResolveGhostscriptPrefersBundledWhenNotForced() {
+        XCTAssertEqual(
+            GhostscriptLocator.resolveGhostscript(
+                forcesSystem: false,
+                bundled: { self.fakeBundled },
+                system: { self.ghostscript("/opt/homebrew/bin/gs") }
+            )?.executablePath,
+            fakeBundled.executablePath)
+    }
+
+    func testResolveGhostscriptFallsBackToSystemWhenNotForcedAndNoBundledCopy() {
+        XCTAssertEqual(
+            GhostscriptLocator.resolveGhostscript(
+                forcesSystem: false,
+                bundled: { nil },
+                system: { self.ghostscript("/opt/homebrew/bin/gs") }
+            )?.executablePath,
+            "/opt/homebrew/bin/gs")
     }
 }

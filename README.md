@@ -58,10 +58,12 @@ copy every preview would then refuse.
 
 A release build can be told to ignore its own bundled Ghostscript and use a
 system install instead: create an empty file at
-`~/Library/Application Support/EPSPreview/force-system-gs`. This is the
-substitution path Ghostscript's own licensing terms give an ordinary user
+`~/Library/Application Support/EPSPreview/force-system-gs`. This exists so a
+release build never *requires* running the bundled AGPL-licensed Ghostscript
 (see [NOTICE.md](NOTICE.md)) — it does not touch the app bundle or its
-signature, and the system copy still goes through the vetting above.
+signature, and the system copy still goes through the vetting above. The
+choice is made once per render-service process, so quit any open Quick Look
+previews (or log out and back in) after creating or removing the file.
 
 The host app is sandboxed and cannot run `gs`, so its status window only
 checks that a candidate exists with safe ownership. An installed but too-old

@@ -60,7 +60,19 @@ enum GhostscriptLocator {
     private static let resolutionCache = GhostscriptResolutionCache(
         failureTTL: failedResolutionTTL,
         clock: { ProcessInfo.processInfo.systemUptime },
-        resolve: { forcesSystemGhostscript() ? systemGhostscript() : (bundledGhostscript() ?? systemGhostscript()) })
+        resolve: {
+            resolveGhostscript(forcesSystem: forcesSystemGhostscript(),
+                               bundled: bundledGhostscript,
+                               system: systemGhostscript)
+        })
+
+    /// The step-0/1/2 ordering itself, split out so a test can drive it with
+    /// fakes instead of the real flag path, bundle layout and system candidates.
+    static func resolveGhostscript(forcesSystem: Bool,
+                                    bundled: () -> Ghostscript?,
+                                    system: () -> Ghostscript?) -> Ghostscript? {
+        forcesSystem ? system() : (bundled() ?? system())
+    }
 
     /// A successful resolution is cached for the life of the process: it costs
     /// several `stat`s plus a `--version` probe and sits on the path of every
@@ -99,14 +111,18 @@ enum GhostscriptLocator {
     /// error: it sends the user to `brew install ghostscript` for a package
     /// they already have.
     static func isLikelyInstalled() -> Bool {
-        isLikelyInstalled(bundled: bundledGhostscript, candidates: systemCandidates)
+        isLikelyInstalled(bundled: bundledGhostscript,
+                           candidates: systemCandidates,
+                           forcesSystem: forcesSystemGhostscript())
     }
 
-    /// `isLikelyInstalled()` with the bundled lookup and the candidate list
-    /// passed in, so a test can cover both halves of the `||` without
-    /// depending on `Bundle.main` or on whatever `gs` the build machine has.
-    static func isLikelyInstalled(bundled: () -> Ghostscript?, candidates: [String]) -> Bool {
-        bundled() != nil || anySystemCandidateIsPresent(candidates)
+    /// `isLikelyInstalled()` with the bundled lookup, the candidate list and
+    /// the forced-system flag passed in, so a test can cover every combination
+    /// without depending on `Bundle.main`, on whatever `gs` the build machine
+    /// has, or on the real flag path.
+    static func isLikelyInstalled(bundled: () -> Ghostscript?, candidates: [String], forcesSystem: Bool = false) -> Bool {
+        if forcesSystem { return anySystemCandidateIsPresent(candidates) }
+        return bundled() != nil || anySystemCandidateIsPresent(candidates)
     }
 
     /// The candidate-scan half of `isLikelyInstalled()`, with the list passed
@@ -147,10 +163,10 @@ enum GhostscriptLocator {
         NSHomeDirectory() + "/Library/Application Support/EPSPreview/force-system-gs"
 
     /// Whether a release build should skip its bundled, pinned Ghostscript
-    /// and resolve a system install instead — the substitution path
-    /// Ghostscript's own aggregation rules require an ordinary user be able
-    /// to take (see NOTICE.md), since the bundled copy is otherwise chosen
-    /// unconditionally and needs no vetting to run.
+    /// and resolve a system install instead — so a release build never
+    /// requires running the bundled AGPL-licensed Ghostscript (see
+    /// NOTICE.md), since the bundled copy is otherwise chosen unconditionally
+    /// and needs no vetting to run.
     static func forcesSystemGhostscript() -> Bool {
         forcesSystemGhostscript(flagPath: forceSystemGhostscriptFlagPath)
     }

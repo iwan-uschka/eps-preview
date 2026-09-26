@@ -45,6 +45,12 @@ When you **build from source** (`scripts/build.sh`) instead of using a
 release, Ghostscript is **not** bundled — the app calls the copy you install
 yourself via Homebrew — so the build-from-source app is MIT all the way down.
 
+Release builds let you substitute your own Ghostscript for the bundled one
+without modifying the app bundle or its signature: create an empty file at
+`~/Library/Application Support/EPSPreview/force-system-gs`, and the render
+service will skip the bundled copy and use a system install (Homebrew /
+MacPorts) instead, vetted the same way as for build-from-source users.
+
 Because the release binary combines this MIT code with AGPL Ghostscript, the
 **release artifact as distributed is covered by the AGPL-3.0** with respect to
 Ghostscript. The corresponding Ghostscript source is available at the links
