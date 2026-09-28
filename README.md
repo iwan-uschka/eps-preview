@@ -134,6 +134,15 @@ behind, clear it once with `sudo rm -rf /Applications/EPSPreview.app` before
 running `make_install.sh` again — that one-time cleanup step is the only
 place `sudo` belongs in this workflow.
 
+`install.sh` writes to `/Applications`, which needs admin-group membership.
+On an organization-managed Mac your account may be a Standard account with no
+local admin password to enter; plain `cp`/`ditto` into `/Applications` then
+fails with "Permission denied" regardless of `sudo`, since a Standard account
+isn't in the `admin` group at all. In that case, use whatever
+privilege-elevation tool your organization's device management provides to
+request temporary admin rights first, then run the script normally, not
+`sudo`, for the reason above.
+
 Each `make_*.sh` is a thin wrapper — for finer control, or to run one piece
 in isolation, the commands underneath are:
 
