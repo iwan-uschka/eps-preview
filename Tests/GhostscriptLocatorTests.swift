@@ -184,6 +184,68 @@ final class GhostscriptLocatorTests: XCTestCase {
         XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/usr/bin/gs"), "/usr")
     }
 
+    func testPrefixRootComesOutWrongForACandidateNotShapedBinGs() {
+        // breaks-if: this is read as a spec rather than as documentation of the
+        // known gap — `prefixRoot` unconditionally drops the last 7 characters,
+        // so a `systemCandidates` entry not ending in "/bin/gs" silently yields
+        // a mangled prefix (here, a trailing slash) instead of failing loudly.
+        XCTAssertEqual(GhostscriptLocator.prefixRoot(forSystemCandidate: "/opt/homebrew/bin/gsc"),
+                      "/opt/homebrew/")
+    }
+
+    func testSystemExecutableRootIsThePrefixsLibDirectory() {
+        XCTAssertEqual(GhostscriptLocator.sandboxExecutableRoot(forSystemPrefix: "/opt/homebrew"),
+                       "/opt/homebrew/lib")
+        XCTAssertEqual(GhostscriptLocator.sandboxExecutableRoot(forSystemPrefix: "/opt/local"),
+                       "/opt/local/lib")
+    }
+
+    // MARK: - Bundled copy's sandbox roots
+
+    /// Builds `<temp>/<uuid>/Fixture.app` with `Contents/Helpers/gs/converter`
+    /// (executable unless `converterIsExecutable` is false) and an empty
+    /// `Contents/Resources/ghostscript`, and returns the `.app` path.
+    private func fixtureAppBundle(converterIsExecutable: Bool = true) throws -> String {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gs-bundle-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let app = root.appendingPathComponent("Fixture.app", isDirectory: true)
+        let helpers = app.appendingPathComponent("Contents/Helpers/gs", isDirectory: true)
+        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: app.appendingPathComponent("Contents/Resources/ghostscript", isDirectory: true),
+            withIntermediateDirectories: true)
+        let converter = helpers.appendingPathComponent("converter")
+        try Data("#!/bin/sh\n".utf8).write(to: converter)
+        try FileManager.default.setAttributes([.posixPermissions: converterIsExecutable ? 0o755 : 0o644],
+                                              ofItemAtPath: converter.path)
+        return app.path
+    }
+
+    func testBundledCopyReadsBothTreesButMapsExecutableOnlyFromHelpers() throws {
+        let app = try fixtureAppBundle()
+        let helpers = app + "/Contents/Helpers/gs"
+        let resources = app + "/Contents/Resources/ghostscript"
+
+        let gs = try XCTUnwrap(GhostscriptLocator.bundledGhostscript(appBundlePath: app))
+
+        XCTAssertEqual(gs.executablePath, helpers + "/converter")
+        XCTAssertEqual(gs.sandboxReadOnlyRoots, [helpers, resources])
+        XCTAssertEqual(gs.sandboxExecutableRoots, [helpers])
+        XCTAssertEqual(gs.sandboxProfile, GhostscriptSandbox.profile(
+            gsExecutablePath: gs.executablePath,
+            readOnlyRoots: [helpers, resources],
+            executableRoots: [helpers],
+            scratchDirectory: NSTemporaryDirectory()))
+    }
+
+    // breaks-if: bundledGhostscript(appBundlePath:) drops its isExecutableFile check on `converter`.
+    func testBundledCopyIsIgnoredWhenTheConverterIsNotExecutable() throws {
+        let app = try fixtureAppBundle(converterIsExecutable: false)
+
+        XCTAssertNil(GhostscriptLocator.bundledGhostscript(appBundlePath: app))
+    }
+
     // MARK: - Ownership and permission vetting
 
     /// Creates `<temp>/<uuid>/gs` and returns its path, with both the file and

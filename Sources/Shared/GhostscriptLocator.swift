@@ -24,10 +24,12 @@ enum GhostscriptLocator {
         /// beyond its two temp files: wherever this interpreter's own
         /// binary, dylibs and resource files live. `GhostscriptSandbox`
         /// turns these into `subpath` rules — everything else on disk stays
-        /// unreadable to `gs` even if `-dSAFER` is fully bypassed. Empty by
-        /// default so existing call sites (tests, older fixtures) that don't
-        /// care about sandboxing pass `[]` explicitly; a production resolution
-        /// path that omits real roots would render nothing.
+        /// unreadable to `gs` even if `-dSAFER` is fully bypassed. Every call
+        /// site — production and test fixtures alike — must pass this
+        /// explicitly; there is no default value, so a resolution path cannot
+        /// silently omit it. Test fakes that don't care about sandboxing pass
+        /// `[]`; a production resolution path that omitted real roots would
+        /// render nothing.
         let sandboxReadOnlyRoots: [String]
 
         /// The narrower subset of `sandboxReadOnlyRoots` that also needs
@@ -220,6 +222,14 @@ enum GhostscriptLocator {
         guard let appPath = BundleLayout.enclosingAppBundlePath(for: Bundle.main.bundleURL) else {
             return nil
         }
+        return bundledGhostscript(appBundlePath: appPath)
+    }
+
+    /// `bundledGhostscript()` with the host app's bundle path passed in, so a
+    /// test can drive it against a fixture `.app` tree on disk — under XCTest
+    /// `Bundle.main` is the test runner, never an `.app`, so the zero-argument
+    /// form always returns `nil` before reaching the sandbox-root logic below.
+    static func bundledGhostscript(appBundlePath appPath: String) -> Ghostscript? {
         let url = URL(fileURLWithPath: appPath)
 
         let binary = url.appendingPathComponent("Contents/Helpers/gs/converter")
@@ -247,17 +257,29 @@ enum GhostscriptLocator {
         // itself and `lib/*.dylib` (loaded via the `@executable_path/lib`
         // rpath scripts/bundle-ghostscript.sh adds). Resources/ghostscript
         // is data (fonts, ICC profiles, init files) gs only ever reads.
-        let sandboxReadOnlyRoots = [helpersRoot, share.path]
-        let sandboxExecutableRoots = [helpersRoot]
-        return Ghostscript(executablePath: binary.path,
-                           environment: childEnvironment(gsLib: gsLib),
-                           sandboxReadOnlyRoots: sandboxReadOnlyRoots,
-                           sandboxExecutableRoots: sandboxExecutableRoots,
-                           sandboxProfile: GhostscriptSandbox.profile(
-                               gsExecutablePath: binary.path,
-                               readOnlyRoots: sandboxReadOnlyRoots,
-                               executableRoots: sandboxExecutableRoots,
-                               scratchDirectory: NSTemporaryDirectory()))
+        return makeGhostscript(executablePath: binary.path,
+                               environment: childEnvironment(gsLib: gsLib),
+                               sandboxReadOnlyRoots: [helpersRoot, share.path],
+                               sandboxExecutableRoots: [helpersRoot])
+    }
+
+    /// The one place a resolution path turns its roots into a `Ghostscript`,
+    /// so the profile is always built from exactly the roots stored beside
+    /// it — a new resolution path, or a change to `GhostscriptSandbox.profile`'s
+    /// parameters, cannot leave one call site granting something else.
+    private static func makeGhostscript(executablePath: String,
+                                        environment: [String: String],
+                                        sandboxReadOnlyRoots: [String],
+                                        sandboxExecutableRoots: [String]) -> Ghostscript {
+        Ghostscript(executablePath: executablePath,
+                    environment: environment,
+                    sandboxReadOnlyRoots: sandboxReadOnlyRoots,
+                    sandboxExecutableRoots: sandboxExecutableRoots,
+                    sandboxProfile: GhostscriptSandbox.profile(
+                        gsExecutablePath: executablePath,
+                        readOnlyRoots: sandboxReadOnlyRoots,
+                        executableRoots: sandboxExecutableRoots,
+                        scratchDirectory: NSTemporaryDirectory()))
     }
 
     /// Candidates are probed in order, and each probe is bounded only by
@@ -272,24 +294,23 @@ enum GhostscriptLocator {
             && hasTrustworthyOwnership(path)
             && meetsMinimumVersion(path) {
             let prefix = prefixRoot(forSystemCandidate: path)
-            let sandboxReadOnlyRoots = [prefix]
-            // Homebrew/MacPorts put every dylib a formula links against
-            // directly in `<prefix>/lib` (scripts/bundle-ghostscript.sh's
-            // resolve_lib mirrors this when sourcing the bundled copy) — the
-            // one subdirectory of the prefix that needs file-map-executable
-            // rather than just file-read*.
-            let sandboxExecutableRoots = [prefix + "/lib"]
-            return Ghostscript(executablePath: path,
-                               environment: childEnvironment(),
-                               sandboxReadOnlyRoots: sandboxReadOnlyRoots,
-                               sandboxExecutableRoots: sandboxExecutableRoots,
-                               sandboxProfile: GhostscriptSandbox.profile(
-                                   gsExecutablePath: path,
-                                   readOnlyRoots: sandboxReadOnlyRoots,
-                                   executableRoots: sandboxExecutableRoots,
-                                   scratchDirectory: NSTemporaryDirectory()))
+            return makeGhostscript(executablePath: path,
+                                   environment: childEnvironment(),
+                                   sandboxReadOnlyRoots: [prefix],
+                                   sandboxExecutableRoots: [sandboxExecutableRoot(forSystemPrefix: prefix)])
         }
         return nil
+    }
+
+    /// Homebrew/MacPorts put every dylib a formula links against directly in
+    /// `<prefix>/lib` (scripts/bundle-ghostscript.sh's resolve_lib mirrors
+    /// this when sourcing the bundled copy) — the one subdirectory of the
+    /// prefix that needs file-map-executable rather than just file-read*.
+    ///
+    /// Not `private`, like `prefixRoot(forSystemCandidate:)`: otherwise only
+    /// an integration test on a machine with a real system `gs` would reach it.
+    static func sandboxExecutableRoot(forSystemPrefix prefix: String) -> String {
+        prefix + "/lib"
     }
 
     /// A system `gs`'s dependencies (dylibs, fontconfig, its own resource

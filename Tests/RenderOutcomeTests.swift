@@ -101,6 +101,7 @@ final class RenderOutcomeTests: XCTestCase {
     }
 
     func testSIGXCPUIsReportedAsATimeout() {
+        // breaks-if: the `termination.status == SIGXCPU` branch in RenderOutcome.result is removed
         let result = RenderOutcome.result(for: signalled(SIGXCPU),
                                           errorOutput: Data(),
                                           outputPath: outputPath())

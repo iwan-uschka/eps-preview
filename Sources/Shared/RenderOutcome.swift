@@ -48,7 +48,7 @@ enum RenderOutcome {
             if termination.status == SIGXFSZ { return (nil, .outputTooLarge) }
             // RLIMIT_CPU's SIGXCPU is the kernel-enforced backstop for the same
             // condition the watchdog above already covers (see
-            // `RenderService.cpuTimeLimitSeconds`) — from the caller's
+            // `GhostscriptLaunch.cpuTimeLimitSeconds`) — from the caller's
             // perspective this is still a timeout, just one the kernel caught
             // instead of Foundation, so it shares that category rather than
             // needing its own `RenderFailure` case.

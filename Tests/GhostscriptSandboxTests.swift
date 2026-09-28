@@ -66,6 +66,7 @@ final class GhostscriptSandboxTests: XCTestCase {
         let text = profile(gs: symlinkedGS.path)
         XCTAssertTrue(text.contains(#"(allow process-exec (literal "\#(realTarget.path)"))"#),
                      "process-exec must match the resolved target the kernel actually execs, not the symlink:\n\(text)")
+        // breaks-if: the `resolvingSymlinksInPath()` call producing resolvedGS is dropped and the raw gsExecutablePath goes into the process-exec rule.
         XCTAssertFalse(text.contains(#"process-exec (literal "\#(symlinkedGS.path)")"#),
                        "the unresolved symlink form must not appear as an exec rule:\n\(text)")
     }
@@ -74,6 +75,27 @@ final class GhostscriptSandboxTests: XCTestCase {
         let text = profile(roots: ["/opt/homebrew", "/usr/local"])
         XCTAssertTrue(text.contains(#"(subpath "/opt/homebrew")"#))
         XCTAssertTrue(text.contains(#"(subpath "/usr/local")"#))
+    }
+
+    func testAllowsReadOfPrivateEtcUnconditionally() {
+        let text = profile(roots: [])
+        XCTAssertTrue(text.contains(#"(subpath "/private/etc")"#),
+                     "gs needs /etc config files readable even with no configured roots:\n\(text)")
+    }
+
+    func testResolvesSymlinksInAReadOnlyRootToASubpathToo() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gs-sandbox-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let realRoot = directory.appendingPathComponent("real-root")
+        try FileManager.default.createDirectory(at: realRoot, withIntermediateDirectories: true)
+        let symlinkedRoot = directory.appendingPathComponent("root-link")
+        try FileManager.default.createSymbolicLink(at: symlinkedRoot, withDestinationURL: realRoot)
+
+        let text = profile(roots: [symlinkedRoot.path])
+        XCTAssertTrue(text.contains(#"(subpath "\#(symlinkedRoot.path)")"#), text)
+        XCTAssertTrue(text.contains(#"(subpath "\#(realRoot.path)")"#), text)
     }
 
     // MARK: - file-map-executable for gs's own dylibs
@@ -119,8 +141,11 @@ final class GhostscriptSandboxTests: XCTestCase {
 
         let text = profile(gs: plainGS.path, roots: ["/opt/homebrew"], execRoots: ["/opt/homebrew/lib"])
         let execLines = text.split(separator: "\n").filter { $0.contains("process-exec") }
-        XCTAssertEqual(execLines.count, 1)
-        XCTAssertTrue(execLines[0].contains(#"(literal "\#(plainGS.path)")"#), "\(execLines)")
+        guard let execLine = execLines.first, execLines.count == 1 else {
+            XCTFail("expected exactly one process-exec line, got \(execLines)")
+            return
+        }
+        XCTAssertTrue(execLine.contains(#"(literal "\#(plainGS.path)")"#), "\(execLine)")
     }
 
     func testDoesNotWidenWriteScopeWhenGrantingFileMapExecutable() {
@@ -130,8 +155,11 @@ final class GhostscriptSandboxTests: XCTestCase {
         let text = profile(roots: ["/opt/homebrew"], execRoots: ["/opt/homebrew/lib"],
                            scratch: "/opt/eps-preview-scratch-test")
         let writeLines = text.split(separator: "\n").filter { $0.contains("(allow file*") }
-        XCTAssertEqual(writeLines.count, 1, "only the scratch directory may be written:\n\(text)")
-        XCTAssertTrue(writeLines[0].contains("eps-preview-scratch-test"), "\(writeLines)")
+        guard let writeLine = writeLines.first, writeLines.count == 1 else {
+            XCTFail("only the scratch directory may be written:\n\(text)")
+            return
+        }
+        XCTAssertTrue(writeLine.contains("eps-preview-scratch-test"), "\(writeLine)")
     }
 
     func testAllowsReadAndWriteOfTheScratchDirectoryAndItsAncestorsUpToRoot() {
@@ -158,6 +186,13 @@ final class GhostscriptSandboxTests: XCTestCase {
         XCTAssertTrue(text.contains(#"(literal "/private/tmp")"#))
     }
 
+    // breaks-if: the `raw == special` half of canonicalPathVariants's condition is removed.
+    func testAllowsBothFormsWhenTheScratchDirectoryIsExactlyTmp() {
+        let text = profile(scratch: "/tmp")
+        XCTAssertTrue(text.contains(#"(allow file* (subpath "/tmp"))"#), text)
+        XCTAssertTrue(text.contains(#"(allow file* (subpath "/private/tmp"))"#), text)
+    }
+
     func testAllowsTheDeviceFilesGhostscriptNeeds() {
         let text = profile()
         for device in ["/dev/null", "/dev/urandom", "/dev/random"] {
@@ -180,10 +215,32 @@ final class GhostscriptSandboxTests: XCTestCase {
         let text = profile(roots: ["/opt/homebrew"], execRoots: ["/opt/homebrew/lib"],
                            scratch: "/private/tmp/eps-preview-test")
         for line in text.split(separator: "\n") where line.contains("process-exec") {
+            // breaks-if: a scratch path is added to the `(allow process-exec ...)` rule alongside resolvedGS.
             XCTAssertFalse(line.contains("eps-preview-test"),
                           "scratch directory must never be exec-able: \(line)")
         }
+        // breaks-if: scratchVariants (or scratchAncestors) are merged into execRoots, the file-map-executable group.
         XCTAssertFalse(fileMapExecutableBlock(in: text)?.contains("eps-preview-test") ?? true,
                       "scratch directory must never be file-map-executable:\n\(text)")
+    }
+
+    // breaks-if: the scratch `(deny file-map-executable ...)` rule is dropped or emitted before `(allow file* ...)`.
+    func testTakesFileMapExecutableBackFromTheScratchDirectorysBroadFileGrant() {
+        // SBPL's last matching rule wins, so the deny must follow the grant.
+        // `(allow file* ...)` is an operation-class wildcard, so the dedicated
+        // file-map-executable group above staying clean of the scratch path
+        // is not enough on its own: the broad grant must be followed by an
+        // explicit deny for every spelling of the scratch directory.
+        let text = profile(scratch: "/tmp/eps-preview-test")
+        let lines = text.split(separator: "\n").map(String.init)
+        for scratch in ["/tmp/eps-preview-test", "/private/tmp/eps-preview-test"] {
+            let grant = lines.firstIndex(of: #"(allow file* (subpath "\#(scratch)"))"#)
+            let deny = lines.firstIndex(of: #"(deny file-map-executable (subpath "\#(scratch)"))"#)
+            XCTAssertNotNil(grant, "missing the scratch grant for \(scratch):\n\(text)")
+            XCTAssertNotNil(deny, "missing the file-map-executable deny for \(scratch):\n\(text)")
+            if let grant, let deny {
+                XCTAssertGreaterThan(deny, grant, "the deny must come after the grant it overrides:\n\(text)")
+            }
+        }
     }
 }

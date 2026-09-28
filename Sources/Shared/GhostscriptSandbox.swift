@@ -102,6 +102,13 @@ enum GhostscriptSandbox {
         lines.append("  (literal \"/dev/random\"))")
         lines.append("")
         lines += scratchVariants.map { "(allow file* \(subpath($0)))" }
+        // `file*` is an operation-class wildcard (like `network*` above), so
+        // on its own it would plausibly also grant `file-map-executable` in
+        // the one directory `gs` can write to — letting a payload written
+        // there be mapped executable. SBPL lets the last matching rule win,
+        // so this narrower deny, placed after the grant, takes it back while
+        // leaving every other file operation `gs`'s temp-file handling uses.
+        lines += scratchVariants.map { "(deny file-map-executable \(subpath($0)))" }
 
         return lines.joined(separator: "\n")
     }

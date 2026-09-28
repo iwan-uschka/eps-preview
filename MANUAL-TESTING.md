@@ -61,8 +61,11 @@ Ghostscript and bundled libraries a release DMG ships (see `README.md`'s
 "Build from source" section). Before cutting a release, also build the DMG
 with `bash scripts/package-release.sh`, install `EPSPreview.app` from it the
 way `README.md`'s "Option A" describes (drag into Applications, "Open
-Anyway"), and ideally do this on a machine or account without Homebrew `gs`
-on `PATH`. Then run §2–§5 against that install too.
+Anyway"), and do this on a machine or account without Homebrew `gs` on
+`PATH` — no automated test exercises the bundled `converter`'s sandbox
+profile (`GhostscriptSandboxIntegrationTests` only ever resolves a system
+`gs`), so this is the only check that the bundled-tree sandbox roots are
+right. Then run §2–§5 against that install too.
 
 ## 2. Finder thumbnails
 

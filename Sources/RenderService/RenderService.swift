@@ -17,7 +17,7 @@ final class RenderService: NSObject, RenderProtocol {
                                     category: "render")
 
     /// Finder asks for a whole folder of thumbnails at once, and every render
-    /// is a separate unsandboxed Ghostscript process with its own time
+    /// is a separate (sandbox-exec-confined) Ghostscript process with its own time
     /// budget. Admission is therefore bounded twice, by the two limits in
     /// `RenderLimits`: at most `maxConcurrentRenders` interpreters run
     /// together, and a request that arrives past `maxInFlightRenders` is
@@ -44,27 +44,9 @@ final class RenderService: NSObject, RenderProtocol {
     /// of that head reaches the log is `RenderOutcome`'s business.
     private static let maxRetainedErrorBytes = 64 * 1024
 
-    /// Grace period between SIGTERM and SIGKILL for a render that overran.
-    private static let terminationGracePeriod: TimeInterval = 2
-
     /// Chunk size for copying the caller's descriptor into our staging file,
     /// so a 100 MB input never becomes a 100 MB allocation here either.
     private static let stagingChunkBytes = 1 << 20
-
-    /// Kernel-enforced backstop for a render that outlives the watchdog:
-    /// even if the watchdog's own dispatch never ran — starved, or the
-    /// process somehow missed both SIGTERM and SIGKILL — RLIMIT_CPU aborts
-    /// the child independently. Comfortably above the watchdog's own
-    /// timeout-then-SIGKILL sequence so it never preempts the normal path.
-    private static let cpuTimeLimitSeconds =
-        Int(RenderLimits.renderTimeout) + Int(terminationGracePeriod) + 10
-
-    /// Ghostscript run with `-dSAFER` has no legitimate reason to fork or
-    /// exec anything, and the sandbox profile below denies both outright;
-    /// this is the same guarantee enforced independently by the kernel's own
-    /// process accounting. 1 rather than 0: some libc paths assume a
-    /// strictly-positive limit.
-    private static let processLimit = 1
 
     func renderEPSToPDF(input: FileHandle, withReply reply: @escaping (Data?, NSNumber?) -> Void) {
         func refuse(_ failure: RenderFailure) {
@@ -177,57 +159,16 @@ final class RenderService: NSObject, RenderProtocol {
             return
         }
 
-        // Built once, at resolution time — see `Ghostscript.sandboxProfile`.
-        let sandboxProfile = gs.sandboxProfile
-
         let process = Process()
-        // Ghostscript runs behind `sh -c 'ulimit …; exec sandbox-exec -p "$profile" …'`
-        // because Process offers no hook for setting a child's rlimits or for
-        // confining it with a sandbox profile. Both `sh`'s `exec` and
-        // `sandbox-exec`'s own launch of its target replace the running
-        // process image rather than forking, so despite the two hops the
-        // process this file tracks, signals and reaps is — throughout —
-        // Ghostscript's, once it starts.
-        //
-        // RLIMIT_AS is deliberately not among the ulimits below: macOS
-        // refuses to lower it for the calling process at all — setrlimit
-        // returns EINVAL for any finite value, not just this shell's
-        // `ulimit -v` (which fails the identical way, and is why it is not
-        // attempted here). Memory exhaustion is bounded instead by what is
-        // already in place: RenderLimits.maxInputBytes, RLIMIT_CPU below
-        // backing the render timeout, and RenderLimits.maxConcurrentRenders
-        // capping how many interpreters can be inflating memory at once.
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // Ghostscript runs behind a `/bin/sh` wrapper that applies its
+        // rlimits and then execs it under `sandbox-exec` — see
+        // `GhostscriptLaunch` for the script, the limits and why the process
+        // this file tracks, signals and reaps is Ghostscript's throughout.
+        process.executableURL = URL(fileURLWithPath: GhostscriptLaunch.shellPath)
         process.environment = gs.environment
-        process.arguments = [
-            "-c",
-            #"""
-            ulimit -f "$1" || { echo "could not limit Ghostscript output size" >&2; exit 71; }
-            ulimit -t "$2" || { echo "could not limit Ghostscript CPU time" >&2; exit 71; }
-            ulimit -u "$3" || { echo "could not limit Ghostscript process count" >&2; exit 71; }
-            shift 3
-            profile="$1"; shift
-            exec /usr/bin/sandbox-exec -p "$profile" "$@"
-            """#,
-            "gs-sandbox",
-            // `ulimit -f` counts blocks whose size differs between shells, so
-            // this is a deliberately generous backstop; the exact cap is
-            // enforced on the finished file.
-            String(RenderLimits.maxOutputBytes / 512),
-            String(Self.cpuTimeLimitSeconds),
-            String(Self.processLimit),
-            sandboxProfile,
-            gs.executablePath,
-            "-dNOPAUSE", "-dBATCH", "-dQUIET",
-            "-dSAFER",                 // sandbox Ghostscript's own file/IO ops
-            "-dEPSCrop",               // crop to the EPS BoundingBox
-            "-dAutoRotatePages=/None", // keep the figure's authored orientation
-            "-sstdout=%stderr",        // gs reports errors on stdout; merge them
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.4",
-            "-sOutputFile=" + outputPath,
-            inputPath,
-        ]
+        process.arguments = GhostscriptLaunch.arguments(for: gs,
+                                                        inputPath: inputPath,
+                                                        outputPath: outputPath)
 
         let errorPipe = Pipe()
         process.standardError = errorPipe
@@ -296,7 +237,7 @@ final class RenderService: NSObject, RenderProtocol {
             process.terminate()                       // SIGTERM: let gs clean up
             // A child stuck in an uninterruptible wait ignores SIGTERM, and it
             // holds a render slot until it dies, so escalate.
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationGracePeriod) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + GhostscriptLaunch.terminationGracePeriod) {
                 // Re-check right before signalling: once Foundation has reaped
                 // the child, its PID may already belong to another process.
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
