@@ -27,10 +27,32 @@ enum GhostscriptLocator {
         /// path that omits real roots would render nothing.
         let sandboxReadOnlyRoots: [String]
 
-        init(executablePath: String, environment: [String: String], sandboxReadOnlyRoots: [String]) {
+        /// The narrower subset of `sandboxReadOnlyRoots` that also needs
+        /// `file-map-executable`: this interpreter's own dylib tree (the
+        /// bundled copy's `lib/`, or a system install's `<prefix>/lib`) —
+        /// `gs`'s dependent libraries are mapped executable by dyld, not just
+        /// read, so a plain `file-read*` grant on their directory is not
+        /// enough for `gs` to load them under the sandbox.
+        let sandboxExecutableRoots: [String]
+
+        /// The `sandbox-exec` profile text for this interpreter, built once
+        /// here rather than by every `render()` call: it depends only on
+        /// `executablePath`, `sandboxReadOnlyRoots`/`sandboxExecutableRoots`
+        /// and the process's temp directory, all fixed once this struct is
+        /// resolved (and this struct itself is cached for the process
+        /// lifetime — see `GhostscriptResolutionCache`).
+        let sandboxProfile: String
+
+        init(executablePath: String,
+             environment: [String: String],
+             sandboxReadOnlyRoots: [String],
+             sandboxExecutableRoots: [String],
+             sandboxProfile: String) {
             self.executablePath = executablePath
             self.environment = environment
             self.sandboxReadOnlyRoots = sandboxReadOnlyRoots
+            self.sandboxExecutableRoots = sandboxExecutableRoots
+            self.sandboxProfile = sandboxProfile
         }
     }
 
@@ -127,9 +149,22 @@ enum GhostscriptLocator {
         // lib/Font search path gs is told about explicitly, but the resource
         // tree also holds things gs looks up by its own convention (Resource/
         // CMap, iccprofiles, ...) that GS_LIB does not need to name.
+        let helpersRoot = binary.deletingLastPathComponent().path
+        // Only Helpers/gs needs file-map-executable: it holds `converter`
+        // itself and `lib/*.dylib` (loaded via the `@executable_path/lib`
+        // rpath scripts/bundle-ghostscript.sh adds). Resources/ghostscript
+        // is data (fonts, ICC profiles, init files) gs only ever reads.
+        let sandboxReadOnlyRoots = [helpersRoot, share.path]
+        let sandboxExecutableRoots = [helpersRoot]
         return Ghostscript(executablePath: binary.path,
                            environment: childEnvironment(gsLib: gsLib),
-                           sandboxReadOnlyRoots: [binary.deletingLastPathComponent().path, share.path])
+                           sandboxReadOnlyRoots: sandboxReadOnlyRoots,
+                           sandboxExecutableRoots: sandboxExecutableRoots,
+                           sandboxProfile: GhostscriptSandbox.profile(
+                               gsExecutablePath: binary.path,
+                               readOnlyRoots: sandboxReadOnlyRoots,
+                               executableRoots: sandboxExecutableRoots,
+                               scratchDirectory: NSTemporaryDirectory()))
     }
 
     /// Candidates are probed in order, and each probe is bounded only by
@@ -143,9 +178,23 @@ enum GhostscriptLocator {
         where FileManager.default.isExecutableFile(atPath: path)
             && hasTrustworthyOwnership(path)
             && meetsMinimumVersion(path) {
+            let prefix = prefixRoot(forSystemCandidate: path)
+            let sandboxReadOnlyRoots = [prefix]
+            // Homebrew/MacPorts put every dylib a formula links against
+            // directly in `<prefix>/lib` (scripts/bundle-ghostscript.sh's
+            // resolve_lib mirrors this when sourcing the bundled copy) — the
+            // one subdirectory of the prefix that needs file-map-executable
+            // rather than just file-read*.
+            let sandboxExecutableRoots = [prefix + "/lib"]
             return Ghostscript(executablePath: path,
                                environment: childEnvironment(),
-                               sandboxReadOnlyRoots: [prefixRoot(forSystemCandidate: path)])
+                               sandboxReadOnlyRoots: sandboxReadOnlyRoots,
+                               sandboxExecutableRoots: sandboxExecutableRoots,
+                               sandboxProfile: GhostscriptSandbox.profile(
+                                   gsExecutablePath: path,
+                                   readOnlyRoots: sandboxReadOnlyRoots,
+                                   executableRoots: sandboxExecutableRoots,
+                                   scratchDirectory: NSTemporaryDirectory()))
         }
         return nil
     }

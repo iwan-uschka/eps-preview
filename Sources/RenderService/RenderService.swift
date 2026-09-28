@@ -113,9 +113,8 @@ final class RenderService: NSObject, RenderProtocol {
             return
         }
 
-        let sandboxProfile = GhostscriptSandbox.profile(gsExecutablePath: gs.executablePath,
-                                                        readOnlyRoots: gs.sandboxReadOnlyRoots,
-                                                        scratchDirectory: NSTemporaryDirectory())
+        // Built once, at resolution time — see `Ghostscript.sandboxProfile`.
+        let sandboxProfile = gs.sandboxProfile
 
         let process = Process()
         // Ghostscript runs behind `sh -c 'ulimit …; exec sandbox-exec -p "$profile" …'`

@@ -33,6 +33,13 @@ enum GhostscriptSandbox {
     ///     kernel actually execs, not whatever symlink form was passed on
     ///     the command line (Homebrew's `/opt/homebrew/bin/gs` is one).
     ///   - readOnlyRoots: `GhostscriptLocator.Ghostscript.sandboxReadOnlyRoots`.
+    ///   - executableRoots: `GhostscriptLocator.Ghostscript.sandboxExecutableRoots`
+    ///     — the dylib tree(s) `gs` itself needs mapped executable (its own
+    ///     bundled `lib/`, or a system install's `<prefix>/lib`). Granted
+    ///     `file-map-executable` in addition to the plain `file-read*` every
+    ///     root in `readOnlyRoots` already gets, since dyld maps a dependent
+    ///     library's code pages with `PROT_EXEC` — a distinct sandbox check
+    ///     from reading the file's bytes.
     ///   - scratchDirectory: the one directory the child may write to. Pass
     ///     `NSTemporaryDirectory()` — the same directory the caller staged
     ///     the input file into and will read the output file back from.
@@ -41,6 +48,7 @@ enum GhostscriptSandbox {
     ///     just those two paths.
     static func profile(gsExecutablePath: String,
                         readOnlyRoots: [String],
+                        executableRoots: [String],
                         scratchDirectory: String) -> String {
         let resolvedGS = URL(fileURLWithPath: gsExecutablePath).resolvingSymlinksInPath().path
         let scratchVariants = canonicalPathVariants(scratchDirectory)
@@ -55,8 +63,19 @@ enum GhostscriptSandbox {
         let scratchAncestors = scratchVariants
             .flatMap(ancestorLiterals)
             .reduceToSortedUnique()
+        // Unlike scratchAncestors above, readRoots gets no ancestor-literal
+        // chain: a subpath read grant does not need its own ancestors
+        // separately allowed the way scratch's mkstemp-style *creation* does
+        // — confirmed empirically (GhostscriptSandboxIntegrationTests renders
+        // through a real, deeply-nested Homebrew prefix with no ancestor
+        // literals beyond the ones scratchAncestors already contributes).
         let readRoots = readOnlyRoots
             .flatMap(canonicalPathVariants)
+            .reduceToSortedUnique()
+        // /System and /usr/lib are the system library paths dyld resolves
+        // against for every process, gs included — granted here as well as
+        // (separately, for file-read*) below.
+        let execRoots = (executableRoots.flatMap(canonicalPathVariants) + ["/System", "/usr/lib"])
             .reduceToSortedUnique()
 
         var lines = [
@@ -65,10 +84,14 @@ enum GhostscriptSandbox {
             "(deny network*)",
             "",
             "(allow process-exec \(literal(resolvedGS)))",
-            "(allow file-map-executable \(literal(resolvedGS)))",
             "",
-            "(allow file-read*",
+            "(allow file-map-executable",
+            "  " + literal(resolvedGS),
         ]
+        lines += execRoots.map { "  " + subpath($0) }
+        lines[lines.count - 1] += ")"
+        lines.append("")
+        lines.append("(allow file-read*")
         lines += scratchAncestors.map { "  " + literal($0) }
         lines.append("  (subpath \"/System\")")
         lines.append("  (subpath \"/usr/lib\")")

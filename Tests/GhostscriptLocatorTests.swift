@@ -46,7 +46,9 @@ final class GhostscriptLocatorTests: XCTestCase {
     }
 
     private func ghostscript(_ path: String) -> GhostscriptLocator.Ghostscript {
-        GhostscriptLocator.Ghostscript(executablePath: path, environment: [:], sandboxReadOnlyRoots: [])
+        GhostscriptLocator.Ghostscript(executablePath: path, environment: [:],
+                                       sandboxReadOnlyRoots: [], sandboxExecutableRoots: [],
+                                       sandboxProfile: "")
     }
 
     // MARK: - Caching
@@ -58,7 +60,8 @@ final class GhostscriptLocatorTests: XCTestCase {
             calls.record()
             return GhostscriptLocator.Ghostscript(executablePath: "/opt/homebrew/bin/gs",
                                                  environment: ["PATH": "/usr/bin:/bin"],
-                                                 sandboxReadOnlyRoots: [])
+                                                 sandboxReadOnlyRoots: [], sandboxExecutableRoots: [],
+                                                 sandboxProfile: "")
         })
 
         XCTAssertEqual(cache.locate()?.executablePath, "/opt/homebrew/bin/gs")
@@ -128,7 +131,8 @@ final class GhostscriptLocatorTests: XCTestCase {
             // caller is inside `locate()` while this one resolves.
             Thread.sleep(forTimeInterval: 0.1)
             return GhostscriptLocator.Ghostscript(executablePath: "/opt/local/bin/gs", environment: [:],
-                                                 sandboxReadOnlyRoots: [])
+                                                 sandboxReadOnlyRoots: [], sandboxExecutableRoots: [],
+                                                 sandboxProfile: "")
         })
 
         DispatchQueue.concurrentPerform(iterations: callers) { _ in
