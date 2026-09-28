@@ -403,11 +403,13 @@ EOF
 # Same GS_LIB layout GhostscriptLocator.bundledGhostscript() builds, and the
 # same gs flags RenderService.render() passes (minus -sstdout=%stderr, which
 # only matters for keeping fd 1 empty in production — this probe merges
-# stdout/stderr itself via 2>&1 below, and minus the `sh -c 'ulimit …'`
-# wrapper), so this exercises the tree the way the shipped app will. A correct
-# tree renders this silently; any output here (a warning, a fallback notice,
-# anything) means the bundled resource tree isn't actually self-contained, so
-# treat it as a failure even where gs itself still exits 0.
+# stdout/stderr itself via 2>&1 below, and minus the `sh -c 'ulimit …'` and
+# `sandbox-exec` wrapper the app puts around it), so this exercises the tree's
+# resource layout, not the sandboxed launch the shipped app performs. A correct
+# tree renders this silently; gs falls back to its compiled-in Homebrew
+# resource path when the bundled one is unusable, and the only trace of that
+# on a machine that has Homebrew is the warning it prints — so any output here
+# is a failure, not just a non-zero exit.
 PROBE_LOG="$(GS_LIB="$OUT/share/Resource/Init:$OUT/share/lib:$OUT/share/Resource/Font" \
   "$OUT/converter" -dNOPAUSE -dBATCH -dQUIET -dSAFER -dEPSCrop \
   -dAutoRotatePages=/None -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 \

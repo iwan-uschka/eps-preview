@@ -100,6 +100,15 @@ final class RenderOutcomeTests: XCTestCase {
         XCTAssertEqual(result.failure, .outputTooLarge)
     }
 
+    func testSIGXCPUIsReportedAsATimeout() {
+        let result = RenderOutcome.result(for: signalled(SIGXCPU),
+                                          errorOutput: Data(),
+                                          outputPath: outputPath())
+
+        XCTAssertNil(result.pdf)
+        XCTAssertEqual(result.failure, .timedOut)
+    }
+
     func testAnOversizedOutputFileIsRejected() throws {
         let path = outputPath()
         try writeSparseFile(ofSize: RenderLimits.maxOutputBytes + 1, to: path)

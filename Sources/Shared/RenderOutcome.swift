@@ -12,7 +12,8 @@ struct RenderTermination {
     /// The exit status, or — when `killedBySignal` — the signal number.
     let status: Int32
     /// Whether *our* watchdog is what fired; a child can be signalled for
-    /// other reasons (the `ulimit -f` SIGXFSZ below among them).
+    /// other reasons (the `ulimit -f` SIGXFSZ and `ulimit -t` SIGXCPU below
+    /// among them).
     let timedOut: Bool
 }
 
@@ -45,6 +46,13 @@ enum RenderOutcome {
         if termination.killedBySignal {
             if termination.timedOut { return (nil, .timedOut) }
             if termination.status == SIGXFSZ { return (nil, .outputTooLarge) }
+            // RLIMIT_CPU's SIGXCPU is the kernel-enforced backstop for the same
+            // condition the watchdog above already covers (see
+            // `RenderService.cpuTimeLimitSeconds`) — from the caller's
+            // perspective this is still a timeout, just one the kernel caught
+            // instead of Foundation, so it shares that category rather than
+            // needing its own `RenderFailure` case.
+            if termination.status == SIGXCPU { return (nil, .timedOut) }
         }
 
         guard termination.status == 0 else {
