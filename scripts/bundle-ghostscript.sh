@@ -5,27 +5,45 @@
 #   lib/*.dylib         every non-system library it transitively needs
 #   share/Resource/…    gs init / font / resource files
 #   share/lib/…
+#   share/iccprofiles/… default colour-space ICC profiles (gs_lev2.ps needs them)
 #   licenses/<formula>/ each bundled project's own license file(s), harvested
 #                       from the Homebrew keg it was built from
 #
-# This lets the app render EPS on machines without Homebrew. It sources
-# Homebrew's Ghostscript, which is AGPL-3.0 — the produced binary is AGPL;
-# see NOTICE.md, whose third-party table this script also regenerates (see
-# "recording third-party licenses" below) so it can't drift from what a build
-# actually bundles.
+# This lets the app render EPS on machines without Homebrew. Ghostscript is
+# built from its own upstream source (AGPL-3.0 — the produced binary is
+# AGPL; see NOTICE.md, whose third-party table this script also regenerates
+# (see "recording third-party licenses" below) so it can't drift from what a
+# build actually bundles), *not* installed from Homebrew's bottle: Homebrew's
+# `ghostscript` formula links tesseract/leptonica/libarchive in for an OCR
+# device this EPS→PDF converter never invokes, which used to drag ~7 unused
+# libraries (and their license/CVE surface) into every release. Building
+# with `--without-tesseract` drops that whole OCR closure; the remaining
+# dependencies (fontconfig, freetype, jbig2dec, jpeg-turbo, libpng, libtiff,
+# little-cms2, openjpeg, libidn) are still sourced from Homebrew, same as
+# before.
 set -euo pipefail
 
-# Pinned Ghostscript release. `brew install ghostscript` always tracks
-# whatever Homebrew currently has on tap, which silently changes the exact
-# interpreter binary — and its CVE exposure — shipped in every future build.
-# Bump this deliberately (after checking the Ghostscript changelog/CVEs) when
-# upgrading, rather than picking up new versions unreviewed.
+# Pinned Ghostscript release, built from upstream source rather than
+# whatever bottle Homebrew currently has on tap — that way the exact
+# interpreter, and its CVE exposure, only change when this pin is bumped.
+# Bump both of these deliberately (after checking the Ghostscript
+# changelog/CVEs) when upgrading:
+#   - EXPECTED_GHOSTSCRIPT_VERSION drives the download URL.
+#   - GHOSTSCRIPT_SOURCE_SHA256 is the sha256 of that exact tarball, from
+#     https://github.com/ArtifexSoftware/ghostpdl-downloads/releases — copy
+#     it from there, don't compute it locally, so a compromised download
+#     mirror can't also supply a matching hash.
 EXPECTED_GHOSTSCRIPT_VERSION="10.07.1"
+# The GitHub release tag has no delimiters: 10.07.1 -> gs10071.
+GHOSTSCRIPT_RELEASE_TAG="gs10071"
+GHOSTSCRIPT_SOURCE_SHA256="56f6a82907c3a73bba95de1319e029adf16477e34df2dea180d390e71e7c4053"
+GHOSTSCRIPT_SOURCE_URL="https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/${GHOSTSCRIPT_RELEASE_TAG}/ghostpdl-${EXPECTED_GHOSTSCRIPT_VERSION}.tar.xz"
 
-# Homebrew resolves the ~20 dylibs gs links against live, so two builds of the
-# same pinned Ghostscript can ship different libtiff / freetype / openjpeg
-# revisions — the parsers untrusted EPS data actually reaches. This manifest
-# pins that closure by hash the way EXPECTED_GHOSTSCRIPT_VERSION pins gs.
+# Homebrew resolves the runtime libs gs links against live, so two builds of
+# the same pinned Ghostscript source can still ship different libtiff /
+# freetype / openjpeg revisions — the parsers untrusted EPS data actually
+# reaches. This manifest pins that closure by hash the way
+# EXPECTED_GHOSTSCRIPT_VERSION pins gs.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPENDENCY_MANIFEST="$ROOT/scripts/ghostscript-dependencies.txt"
 NOTICE_FILE="$ROOT/NOTICE.md"
@@ -37,41 +55,102 @@ NOTICE_END_MARKER="<!-- END GENERATED THIRD-PARTY MANIFEST -->"
 . "$ROOT/scripts/lib/ghostscript-thirdparty.sh"
 
 OUT="${1:?usage: bundle-ghostscript.sh <output-dir>}"
-# Cleaned up from a trap, not just the success-path `rm -f` calls below, so an
-# aborted run (a Cellar-attribution or version error, a missing license file)
-# doesn't leave .harvest-* scratch files sitting in $OUT.
-trap 'rm -f "$OUT"/.harvest-*' EXIT INT TERM
 
-command -v brew >/dev/null 2>&1 || { echo "error: Homebrew is required to source Ghostscript."; exit 1; }
-if ! brew list ghostscript >/dev/null 2>&1; then
-  AVAILABLE_VERSION="$(brew info --json=v2 ghostscript 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["formulae"][0]["versions"]["stable"])' 2>/dev/null || echo unknown)"
-  if [ "$AVAILABLE_VERSION" != "$EXPECTED_GHOSTSCRIPT_VERSION" ] && [ "${ALLOW_GHOSTSCRIPT_VERSION_MISMATCH:-0}" != "1" ]; then
-    echo "error: Homebrew would install Ghostscript $AVAILABLE_VERSION, this script is pinned to $EXPECTED_GHOSTSCRIPT_VERSION."
-    echo "       Review the Ghostscript changelog/CVEs for the new version, then either:"
-    echo "         - update EXPECTED_GHOSTSCRIPT_VERSION in this script to $AVAILABLE_VERSION, or"
-    echo "         - pin Homebrew to the expected version."
-    echo "       To install anyway (not recommended), re-run with ALLOW_GHOSTSCRIPT_VERSION_MISMATCH=1."
-    exit 1
-  fi
-  brew install ghostscript
-fi
+command -v brew >/dev/null 2>&1 || { echo "error: Homebrew is required to source Ghostscript's dependencies."; exit 1; }
+command -v make >/dev/null 2>&1 || { echo "error: make is required to build Ghostscript (install Xcode Command Line Tools)."; exit 1; }
+command -v cc >/dev/null 2>&1 || { echo "error: a C compiler is required to build Ghostscript (install Xcode Command Line Tools)."; exit 1; }
 
 realpath_py() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
-GS_BIN="$(realpath_py "$(brew --prefix ghostscript)/bin/gs")"
 PREFIX="$(brew --prefix)"
-[ -x "$GS_BIN" ] || { echo "error: gs not found at $GS_BIN"; exit 1; }
+
+# The libraries Ghostscript itself needs once OCR is out of the picture —
+# NOT leptonica/libarchive/tesseract, which is the whole point of building
+# from source instead of using Homebrew's bottle.
+GS_RUNTIME_DEPS="fontconfig freetype jbig2dec jpeg-turbo libpng libtiff little-cms2 openjpeg libidn"
+GS_BUILD_ONLY_DEPS="pkgconf"
+
+echo "→ ensuring Ghostscript's (non-OCR) build dependencies are installed…"
+for formula in $GS_RUNTIME_DEPS $GS_BUILD_ONLY_DEPS; do
+  brew list "$formula" >/dev/null 2>&1 || brew install "$formula"
+done
+
+PKG_CONFIG_PATH=""
+CPATH=""
+LIBRARY_PATH=""
+for formula in $GS_RUNTIME_DEPS; do
+  dep_prefix="$(brew --prefix "$formula")"
+  PKG_CONFIG_PATH="$dep_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+  CPATH="$dep_prefix/include:$CPATH"
+  LIBRARY_PATH="$dep_prefix/lib:$LIBRARY_PATH"
+done
+export PKG_CONFIG_PATH CPATH LIBRARY_PATH
+
+CLEANUP_DIRS=()
+_cleanup() {
+  local d
+  for d in "${CLEANUP_DIRS[@]:-}"; do
+    [ -n "$d" ] && rm -rf "$d"
+  done
+  # Not just the success-path `rm -f` calls below: an aborted run (a
+  # Cellar-attribution or version error, a missing license file) shouldn't
+  # leave .harvest-* scratch files sitting in $OUT either. Folded into the
+  # same trap as CLEANUP_DIRS above rather than a second `trap ... EXIT INT
+  # TERM` registration, since a later one on the same signal replaces rather
+  # than stacks with an earlier one — a separate trap here would silently
+  # stop cleaning up BUILD_DIR/PROBE the moment it fired.
+  rm -f "$OUT"/.harvest-*
+}
+trap _cleanup EXIT INT TERM
+
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/eps-ghostscript-build.XXXXXX")"
+CLEANUP_DIRS+=("$BUILD_DIR")
+
+echo "→ downloading Ghostscript $EXPECTED_GHOSTSCRIPT_VERSION source…"
+TARBALL="$BUILD_DIR/ghostpdl-$EXPECTED_GHOSTSCRIPT_VERSION.tar.xz"
+curl -fsSL -o "$TARBALL" "$GHOSTSCRIPT_SOURCE_URL"
+ACTUAL_SHA256="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
+if [ "$ACTUAL_SHA256" != "$GHOSTSCRIPT_SOURCE_SHA256" ]; then
+  echo "error: downloaded Ghostscript source does not match the pinned checksum."
+  echo "       expected $GHOSTSCRIPT_SOURCE_SHA256"
+  echo "       got      $ACTUAL_SHA256"
+  echo "       Refusing to build from an unverified source tarball."
+  exit 1
+fi
+
+echo "→ extracting…"
+tar -xf "$TARBALL" -C "$BUILD_DIR"
+SRC="$BUILD_DIR/ghostpdl-$EXPECTED_GHOSTSCRIPT_VERSION"
+
+echo "→ configuring Ghostscript (--without-tesseract: no OCR device, so no tesseract/leptonica/libarchive/webp-mux/giflib in the link closure)…"
+(
+  cd "$SRC"
+  # Delete the vendored copies of libraries Homebrew already provides, so
+  # configure links the system copies instead — same approach Homebrew's own
+  # formula takes. leptonica/tesseract are removed too: --without-tesseract
+  # skips them, but dropping the source keeps the tree honest about what's
+  # actually being built.
+  rm -rf expat freetype jbig2dec jpeg lcms2mt libpng openjpeg tiff zlib leptonica tesseract
+  ./configure \
+    --disable-compile-inits \
+    --disable-cups \
+    --disable-gtk \
+    --with-system-libtiff \
+    --without-versioned-path \
+    --without-x \
+    --without-tesseract
+)
+
+echo "→ building…"
+( cd "$SRC" && make -j"$(sysctl -n hw.ncpu)" )
+
+GS_BIN="$(realpath_py "$SRC/bin/gs")"
+[ -x "$GS_BIN" ] || { echo "error: the build did not produce a gs binary at $GS_BIN"; exit 1; }
 
 INSTALLED_VERSION="$("$GS_BIN" --version)"
 if [ "$INSTALLED_VERSION" != "$EXPECTED_GHOSTSCRIPT_VERSION" ]; then
-  if [ "${ALLOW_GHOSTSCRIPT_VERSION_MISMATCH:-0}" != "1" ]; then
-    echo "error: Homebrew has Ghostscript $INSTALLED_VERSION, this script is pinned to $EXPECTED_GHOSTSCRIPT_VERSION."
-    echo "       Review the Ghostscript changelog/CVEs for the new version, then either:"
-    echo "         - update EXPECTED_GHOSTSCRIPT_VERSION in this script to $INSTALLED_VERSION, or"
-    echo "         - pin Homebrew to the expected version."
-    echo "       To bundle anyway (not recommended), re-run with ALLOW_GHOSTSCRIPT_VERSION_MISMATCH=1."
-    exit 1
-  fi
-  echo "warning: bundling unpinned Ghostscript $INSTALLED_VERSION (expected $EXPECTED_GHOSTSCRIPT_VERSION)"
+  echo "error: the built gs reports version $INSTALLED_VERSION, expected $EXPECTED_GHOSTSCRIPT_VERSION."
+  echo "       Something about the pinned source tarball or build doesn't match the pin above."
+  exit 1
 fi
 
 rm -rf "$OUT"; mkdir -p "$OUT/lib"
@@ -158,11 +237,15 @@ retarget "$OUT/converter"
 rewrite_macho -add_rpath "@executable_path/lib" "$OUT/converter"
 
 echo "→ copying Ghostscript resources…"
-GSSHARE="$(dirname "$(dirname "$GS_BIN")")/share/ghostscript"
-[ -d "$GSSHARE/Resource" ] || GSSHARE="$("$GS_BIN" -h 2>/dev/null | grep -m1 'Resource/Init' | sed 's#/Resource/Init.*##' | tr -d ' :')"
 mkdir -p "$OUT/share"
-cp -R "$GSSHARE/Resource" "$OUT/share/"
-cp -R "$GSSHARE/lib"      "$OUT/share/"
+cp -R "$SRC/Resource"     "$OUT/share/"
+cp -R "$SRC/lib"          "$OUT/share/"
+# gs_lev2.ps resolves the default color-space ICC profiles relative to
+# Resource/Init's parent (i.e. a sibling `iccprofiles/`, same layout Homebrew
+# ships under share/ghostscript/) — without it, setdevice fails outright
+# (caught and reported as "Unable to open the initial device") on any machine
+# that doesn't happen to also have Ghostscript's build-time --prefix on disk.
+cp -R "$SRC/iccprofiles"  "$OUT/share/"
 
 echo "→ ad-hoc signing…"
 for dy in "$OUT"/lib/*.dylib; do codesign --force --sign - "$dy"; done
@@ -216,6 +299,12 @@ FORMULAS_FILE="$OUT/.harvest-formulas"
 : > "$FORMULAS_FILE"
 while IFS="$(printf '\t')" read -r base src_path; do
   [ -n "$base" ] || continue
+  # "converter" (gs itself) is built from the pinned upstream source tarball,
+  # not a Homebrew keg — it's not one of the third-party libraries this loop
+  # attributes, and already has its own AGPL notice/source link/hash above in
+  # NOTICE.md. Only its .dylib runtime dependencies go through Homebrew-formula
+  # attribution here.
+  [ "$base" = "converter" ] && continue
   eps_formula_from_cellar_path "$src_path" >> "$FORMULAS_FILE" || {
     echo "error: $base resolved to $src_path, which is not inside a Homebrew Cellar keg."
     echo "       Can't attribute it to a formula for the third-party license manifest."
@@ -287,7 +376,7 @@ rm -f "$SOURCES_FILE" "$ROWS_FILE" "$NOTICE_TABLE"
 echo "   recorded $FORMULA_COUNT third-party projects in ${NOTICE_FILE#"$ROOT"/} and licenses/ under $OUT"
 
 echo "→ verifying the assembled tree…"
-for dir in "$OUT/share/Resource/Init" "$OUT/share/lib"; do
+for dir in "$OUT/share/Resource/Init" "$OUT/share/lib" "$OUT/share/iccprofiles"; do
   [ -d "$dir" ] || { echo "error: Ghostscript resource tree incomplete, missing $dir."; exit 1; }
 done
 
@@ -304,12 +393,7 @@ fi
 "$OUT/converter" --version >/dev/null
 
 PROBE="$(mktemp -d)"
-# Cleaned up from a trap, not just on the success path: the probe-render check
-# below exits 1, and a script that leaks a temp directory on every failed run
-# litters $TMPDIR while it is being worked on. Combined with the .harvest-*
-# cleanup registered above, since a later trap on the same signal replaces
-# rather than stacks with an earlier one.
-trap 'rm -rf "$PROBE"; rm -f "$OUT"/.harvest-*' EXIT INT TERM
+CLEANUP_DIRS+=("$PROBE")
 cat > "$PROBE/probe.eps" <<'EOF'
 %!PS-Adobe-3.0 EPSF-3.0
 %%BoundingBox: 0 0 8 8
@@ -321,10 +405,9 @@ EOF
 # only matters for keeping fd 1 empty in production — this probe merges
 # stdout/stderr itself via 2>&1 below, and minus the `sh -c 'ulimit …'`
 # wrapper), so this exercises the tree the way the shipped app will. A correct
-# tree renders this silently; gs falls back to its compiled-in Homebrew
-# resource path when the bundled one is unusable, and the only trace of that
-# on a machine that has Homebrew is the warning it prints — so any output here
-# is a failure, not just a non-zero exit.
+# tree renders this silently; any output here (a warning, a fallback notice,
+# anything) means the bundled resource tree isn't actually self-contained, so
+# treat it as a failure even where gs itself still exits 0.
 PROBE_LOG="$(GS_LIB="$OUT/share/Resource/Init:$OUT/share/lib:$OUT/share/Resource/Font" \
   "$OUT/converter" -dNOPAUSE -dBATCH -dQUIET -dSAFER -dEPSCrop \
   -dAutoRotatePages=/None -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 \
