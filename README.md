@@ -136,9 +136,10 @@ place `sudo` belongs in this workflow.
 
 `install.sh` writes to `/Applications`, which needs admin-group membership.
 On an organization-managed Mac your account may be a Standard account with no
-local admin password to enter; plain `cp`/`ditto` into `/Applications` then
-fails with "Permission denied" regardless of `sudo`, since a Standard account
-isn't in the `admin` group at all. In that case, use whatever
+local admin password to authenticate `sudo` with; the `cp`/`mv` in
+`install.sh` then fails with "Permission denied", and `sudo` isn't a
+workaround here either way — see above for why running as root is the wrong
+fix even when it would technically succeed. In that case, use whatever
 privilege-elevation tool your organization's device management provides to
 request temporary admin rights first, then run the script normally, not
 `sudo`, for the reason above.
