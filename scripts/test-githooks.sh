@@ -159,6 +159,32 @@ else
     "rc=$RC args=$(cat "$WORK/shellcheck.args" 2>/dev/null)"
 fi
 
+# The repo-root make_*.sh wrappers are shell scripts outside scripts/ too.
+# breaks-if: pre-commit's shellcheck pathspec drops ':(glob)make_*.sh'
+new_repo
+printf 'exec true\n' > "$REPO/make_thing.sh"
+stage make_thing.sh
+stub shellcheck 0
+run_pre_commit "$STUB:$PATH"
+if [ "$RC" -eq 0 ] && [[ "$(cat "$WORK/shellcheck.args" 2>/dev/null)" == *"make_thing.sh"* ]]; then
+  pass "a repo-root make_*.sh wrapper is shellchecked"
+else
+  fail "a repo-root make_*.sh wrapper is shellchecked" \
+    "rc=$RC args=$(cat "$WORK/shellcheck.args" 2>/dev/null)"
+fi
+
+# breaks-if: the make_*.sh pathspec loses its ':(glob)' prefix and matches below the repo root
+new_repo
+printf 'exec true\n' > "$REPO/Sources/make_nested.sh"
+stage Sources/make_nested.sh
+stub shellcheck 1
+run_pre_commit "$STUB:$PATH"
+if [ "$RC" -eq 0 ] && [ ! -e "$WORK/shellcheck.args" ]; then
+  pass "a make_*.sh below the repo root is left alone"
+else
+  fail "a make_*.sh below the repo root is left alone" "rc=$RC out=$OUT"
+fi
+
 # Files the hook does not claim to cover must not be handed to shellcheck.
 new_repo
 printf 'echo elsewhere\n' > "$REPO/elsewhere.sh"

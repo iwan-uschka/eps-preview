@@ -101,7 +101,8 @@ own render starts.
 
 ### Option A — Download (recommended, nothing to build)
 
-1. Download `EPSPreview-x.y.z.dmg` from the
+1. Download `EPSPreview-x.y.z.dmg` (and optionally `EPSPreview-x.y.z.dmg.sha256`;
+   check it with `shasum -a 256 -c EPSPreview-x.y.z.dmg.sha256`) from the
    [**Releases**](https://github.com/Zhangyanbo/eps-preview/releases) page.
 2. Open the `.dmg` and drag **EPSPreview.app** onto **Applications**.
 3. Open it once. macOS will block it the first time because the app isn't
@@ -111,6 +112,10 @@ own render starts.
 
 The release is **self-contained** — Ghostscript is bundled, so you do **not**
 need Homebrew or any other install. Works on macOS 14+ (Apple Silicon).
+
+> Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
+> Developer Program membership ($99/yr) to notarize the app. The project is
+> otherwise free and needs no account to build, sign, or run.
 
 ### Option B — Build from source
 
@@ -126,8 +131,14 @@ bash scripts/make_test.sh       # full test suite
 bash scripts/make_install.sh    # build, install to /Applications, register extensions
 ```
 
+The repo root also has `make_build.sh`, `make_install.sh` and `make_release.sh`
+— one-liners that `cd` to the repo root and hand their arguments to
+`scripts/build.sh`, `scripts/make_install.sh` and `scripts/package-release.sh`
+(see [Releasing](#releasing)); the root `make_install.sh` runs
+`scripts/make_install.sh`, so it builds first and refuses `sudo` the same way.
+
 `scripts/make_uninstall.sh` reverses `make_install.sh`. **Never run
-`make_install.sh` / `make_uninstall.sh` with `sudo`** — both refuse outright
+`make_install.sh` / `make_uninstall.sh` with `sudo`** — they refuse outright
 and exit 1 if you do. The guard lives only in the `make_*.sh` wrappers, so if
 you run the underlying `scripts/install.sh` / `scripts/uninstall.sh` directly
 (see below), the same "never with `sudo`" rule applies but nothing will stop
@@ -136,9 +147,13 @@ per-user; running as root registers the extensions into *root's*
 LaunchServices database, invisible to your actual login session, which
 silently breaks Finder's thumbnails even though the install "succeeds". If a
 past `sudo` run already left a root-owned `/Applications/EPSPreview.app`
-behind, clear it once with `sudo rm -rf /Applications/EPSPreview.app` before
-running `make_install.sh` again — that one-time cleanup step is the only
-place `sudo` belongs in this workflow.
+behind, `install.sh` cannot remove it: it stops with an error (removing its
+staging copy) instead of installing into a half-deleted bundle. It prints
+`rm`'s own error and, if that is "Permission denied", tells you to clear the
+bundle once with `sudo rm -rf /Applications/EPSPreview.app` before running
+`make_install.sh` again (any other error is yours to fix first) — that
+one-time cleanup step is the only
+place `sudo` belongs in this workflow, and the script never runs it for you.
 
 `install.sh` writes to `/Applications`, which needs admin-group membership.
 On an organization-managed Mac your account may be a Standard account with no
@@ -165,7 +180,9 @@ bash scripts/test-ghostscript-thirdparty.sh      # third-party license manifest 
 bash scripts/test-githooks.sh                    # the git hooks' own logic
 bash scripts/test-make-scripts.sh                # the make_*.sh wrappers' own logic
 bash scripts/test-refresh-thumbnails.sh          # refresh-thumbnails.sh's qlmanage failure path
-bash scripts/test-package-release.sh             # package-release.sh's and build.sh's version validation
+bash scripts/test-package-release.sh             # package-release.sh's guards, CHANGELOG.md stamp/restore, build.sh's version validation
+bash scripts/test-release-checks.sh              # scripts/lib/release-checks.sh helpers against throwaway git repos
+bash scripts/test-replace-bundle.sh              # install.sh's old-bundle swap, incl. an undeletable old bundle
 bash scripts/test-check-bundle-identifiers.sh    # check-bundle-identifiers.sh's mismatch detection
 bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.yml, install/uninstall scripts, Info.plists and (if built) bundles
 ```
@@ -211,18 +228,26 @@ pre-push hooks against throwaway repos and stubbed tools, and
 `scripts/test-make-scripts.sh` pins `make_install.sh`/`make_uninstall.sh`'s
 refusal to run as root, their delegation to `build.sh`/`install.sh`/
 `uninstall.sh` otherwise, and `make_test.sh`'s refusal to run without
-`xcodegen` on `PATH`; `scripts/test-refresh-thumbnails.sh` pins
-`refresh-thumbnails.sh` stopping before any restart when `qlmanage` fails, and
-`scripts/test-package-release.sh` pins `package-release.sh` rejecting a
-non-`MAJOR.MINOR.PATCH` version, and `build.sh` rejecting such an
-`EPS_MARKETING_VERSION`, before either builds anything.
+`xcodegen` on `PATH`, plus the repo-root `make_*.sh` wrappers forwarding
+their arguments and exit status; `scripts/test-refresh-thumbnails.sh` pins
+`refresh-thumbnails.sh` stopping before any restart when `qlmanage` fails,
+`scripts/test-package-release.sh` pins `package-release.sh` refusing a
+missing or non-`MAJOR.MINOR.PATCH` version, a dirty tree, an existing tag or
+an empty `## [Unreleased]` before it stamps or builds anything, and restoring
+`CHANGELOG.md` byte for byte when the (stubbed) build fails, and `build.sh`
+rejecting a malformed `EPS_MARKETING_VERSION`;
+`scripts/test-release-checks.sh` pins the same helpers
+(`scripts/lib/release-checks.sh`) case by case, including the changelog
+stamp, the `.sha256` file and the printed `gh release create` command (run
+against a stub `gh`); and `scripts/test-replace-bundle.sh` pins `install.sh`
+refusing to install over an old bundle it cannot delete.
 `scripts/test-check-bundle-identifiers.sh` pins `check-bundle-identifiers.sh`
 failing on each one-sided identifier rename, against mutated throwaway copies
 of the files it reads (it needs `swift` and `PlistBuddy`, so macOS with Xcode).
 
 A source build is **not** self-contained: it calls your Homebrew `gs` at
 runtime (keeping the build MIT all the way down). To produce a self-contained,
-shareable `.dmg` like the release, run `bash scripts/package-release.sh`.
+shareable `.dmg` like the release, see [Releasing](#releasing).
 
 `package-release.sh` builds Ghostscript from a *pinned* upstream source
 tarball (`EXPECTED_GHOSTSCRIPT_VERSION` and `GHOSTSCRIPT_SOURCE_SHA256` in
@@ -251,9 +276,37 @@ data — so the table can't drift from what a build actually bundles the way a
 hand-maintained one could. Running either script updates `NOTICE.md`
 in place; commit the result.
 
-> Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
-> Developer Program membership ($99/yr) to notarize the app. The project is
-> otherwise free and needs no account to build, sign, or run.
+### Releasing
+
+Keep [CHANGELOG.md](CHANGELOG.md) current as you go: add entries under
+`## [Unreleased]` in the same commit as the change. To cut a release:
+
+```bash
+bash make_release.sh 1.2.0      # = bash scripts/package-release.sh 1.2.0
+```
+
+The version is required and must be plain `MAJOR.MINOR.PATCH` (no `v`
+prefix, no `-rc1` suffix). Before it changes anything or starts the build,
+the script refuses to run if the working tree is not clean, if tag `v1.2.0`
+already exists locally, or if `CHANGELOG.md` is missing, already has a
+`## [1.2.0]` section, or its `## [Unreleased]` section is empty (blank lines and bare `###` subheadings
+don't count). It then renames `## [Unreleased]` to `## [1.2.0] - <today>`
+under a fresh, empty `## [Unreleased]`, builds, and writes
+`dist/EPSPreview-1.2.0.dmg` plus `dist/EPSPreview-1.2.0.dmg.sha256` (check it
+with `shasum -a 256 -c EPSPreview-1.2.0.dmg.sha256` from the download
+directory). If any step after the stamp fails, `CHANGELOG.md` is restored
+byte for byte. `NOTICE.md` is not: if the build already regenerated its
+third-party table, run `git checkout NOTICE.md` too, then fix the cause and
+rerun.
+
+On success it prints, but does not run, the commands that publish the
+release: `git add` of the files it changed (`CHANGELOG.md`, plus `NOTICE.md`
+if the bundled-library table changed) with `git commit -m 'Release 1.2.0'` and
+`git push`, then a `gh release create v1.2.0 …` that uploads the DMG and its
+checksum with the `## [1.2.0]` changelog section as release notes. `gh`
+creates the `v1.2.0` tag on the pushed commit, so there is no separate
+`git tag` step. Run through [MANUAL-TESTING.md](MANUAL-TESTING.md) against the
+DMG before publishing.
 
 ## Uninstall
 
@@ -280,7 +333,7 @@ git config core.hooksPath githooks
 ```
 
 `pre-commit` runs `shellcheck` on staged `scripts/**/*.sh` (subdirectories
-included) and on the hooks themselves, plus SwiftLint (against the committed
+included), on the repo-root `make_*.sh` wrappers and on the hooks themselves, plus SwiftLint (against the committed
 `.swiftlint.yml` baseline) on staged Swift sources; `pre-push` runs
 `bash scripts/build.sh` and then `xcodebuild test` in the same Release
 configuration, so neither a broken build nor a failing test reaches the
@@ -302,8 +355,10 @@ tagging a release.
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs` under a per-child `sandbox-exec` profile) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator + sandbox profile (compiled into every target) |
 | `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
+| `CHANGELOG.md` | Release history; `## [Unreleased]` collects entries for the next release |
 | `MANUAL-TESTING.md` | Manual Quick Look/Finder end-to-end checklist, run before each release |
-| `scripts/` | Build / install / uninstall / thumbnail-refresh |
+| `make_build.sh`, `make_install.sh`, `make_release.sh` | Repo-root shortcuts for `scripts/build.sh`, `scripts/make_install.sh`, `scripts/package-release.sh` |
+| `scripts/` | Build / install / uninstall / thumbnail-refresh / release packaging |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |
 | `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |
 | `project.yml` | XcodeGen project definition |

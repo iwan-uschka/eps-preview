@@ -86,12 +86,14 @@ cp -R "$APP" "$TMP_DEST"
 xattr -dr com.apple.quarantine "$TMP_DEST" 2>/dev/null || true
 # The render service only talks to peers inside the *same* app bundle, so the
 # signature has to be intact in the installed copy, not just in build/. The
-# same-volume `mv` below is a rename, so it leaves the verified bundle as is.
+# same-volume rename done by replace_bundle below leaves the verified bundle as
+# is.
 codesign --verify --deep --strict "$TMP_DEST" || {
   rm -rf "$TMP_DEST"
   echo "error: signature invalid in the copy made for $DEST — rebuild with: bash scripts/build.sh"; exit 1; }
-rm -rf "$DEST"
-mv "$TMP_DEST" "$DEST"
+# shellcheck source=lib/replace-bundle.sh disable=SC1091
+. "$ROOT/scripts/lib/replace-bundle.sh"
+replace_bundle "$TMP_DEST" "$DEST" || exit 1
 echo "  ✓ signature valid at $DEST"
 
 echo "── Registering extensions ──"
