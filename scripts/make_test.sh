@@ -57,6 +57,14 @@ echo "── replace-bundle.sh (install.sh's bundle swap) tests ──"
 bash scripts/test-replace-bundle.sh
 
 echo
+echo "── install.sh / uninstall.sh failure-path tests ──"
+bash scripts/test-install.sh
+
+echo
+echo "── signature-checks.sh (post-signing assertions) tests ──"
+bash scripts/test-signature-checks.sh
+
+echo
 echo "── check-bundle-identifiers.sh tests ──"
 bash scripts/test-check-bundle-identifiers.sh
 

@@ -219,16 +219,23 @@ enum GhostscriptLocator {
 
     /// Looks for a self-contained Ghostscript at `<HostApp>.app/Contents/Helpers/gs/`.
     private static func bundledGhostscript() -> Ghostscript? {
-        guard let appPath = BundleLayout.enclosingAppBundlePath(for: Bundle.main.bundleURL) else {
+        bundledGhostscript(enclosing: Bundle.main.bundleURL)
+    }
+
+    /// `bundledGhostscript()` with the bundle to walk up from passed in, so a
+    /// test can cover both a bundle nested inside a fixture `.app` and one
+    /// that sits in no `.app` at all — under XCTest `Bundle.main` is the test
+    /// runner, not this app.
+    static func bundledGhostscript(enclosing bundleURL: URL) -> Ghostscript? {
+        guard let appPath = BundleLayout.enclosingAppBundlePath(for: bundleURL) else {
             return nil
         }
         return bundledGhostscript(appBundlePath: appPath)
     }
 
     /// `bundledGhostscript()` with the host app's bundle path passed in, so a
-    /// test can drive it against a fixture `.app` tree on disk — under XCTest
-    /// `Bundle.main` is the test runner, never an `.app`, so the zero-argument
-    /// form always returns `nil` before reaching the sandbox-root logic below.
+    /// test can drive it against a fixture `.app` tree on disk without
+    /// depending on where the test runner itself lives.
     static func bundledGhostscript(appBundlePath appPath: String) -> Ghostscript? {
         let url = URL(fileURLWithPath: appPath)
 
@@ -387,7 +394,10 @@ enum GhostscriptLocator {
         mode & 0o022 == 0
     }
 
-    private static func meetsMinimumVersion(_ path: String) -> Bool {
+    /// Not `private`, like `versionString`: together with `probeVersion` it is
+    /// the only thing standing between a too-old or broken `gs` and every
+    /// render, and a test can point it at a fake `gs` script it writes itself.
+    static func meetsMinimumVersion(_ path: String) -> Bool {
         guard let version = probeVersion(path) else { return false }
         return versionString(version, meetsMinimum: minimumSystemVersion)
     }
@@ -407,7 +417,10 @@ enum GhostscriptLocator {
         return fields[1] >= minimum.minor
     }
 
-    private static func probeVersion(_ path: String) -> String? {
+    /// The first line `gs --version` prints, or `nil` when the candidate cannot
+    /// be launched, exits non-zero or prints nothing. Not `private`, for the
+    /// reason `meetsMinimumVersion` gives.
+    static func probeVersion(_ path: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = ["--version"]

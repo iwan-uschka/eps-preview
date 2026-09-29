@@ -246,6 +246,27 @@ final class GhostscriptLocatorTests: XCTestCase {
         XCTAssertNil(GhostscriptLocator.bundledGhostscript(appBundlePath: app))
     }
 
+    func testBundledCopyIsFoundFromABundleNestedInsideTheApp() throws {
+        let app = try fixtureAppBundle()
+        let service = URL(fileURLWithPath: app)
+            .appendingPathComponent("Contents/PlugIns/EPSThumbnail.appex/Contents/XPCServices/RenderService.xpc")
+
+        let gs = try XCTUnwrap(GhostscriptLocator.bundledGhostscript(enclosing: service))
+
+        XCTAssertEqual(gs.executablePath, app + "/Contents/Helpers/gs/converter")
+    }
+
+    // breaks-if: bundledGhostscript(enclosing:) falls back to the bundle's own path when no `.app` encloses it.
+    func testBundledCopyIsIgnoredOutsideAnyAppBundle() throws {
+        // The same Contents/Helpers/gs tree as the fixture `.app`, under a
+        // directory that is not one: only the missing `.app` stops it.
+        let app = try fixtureAppBundle()
+        let notAnApp = URL(fileURLWithPath: app).deletingLastPathComponent().appendingPathComponent("NotAnApp")
+        try FileManager.default.moveItem(atPath: app, toPath: notAnApp.path)
+
+        XCTAssertNil(GhostscriptLocator.bundledGhostscript(enclosing: notAnApp))
+    }
+
     // MARK: - Ownership and permission vetting
 
     /// Creates `<temp>/<uuid>/gs` and returns its path, with both the file and
