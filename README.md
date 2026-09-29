@@ -183,12 +183,15 @@ bash scripts/test-refresh-thumbnails.sh          # refresh-thumbnails.sh's qlman
 bash scripts/test-package-release.sh             # package-release.sh's guards, CHANGELOG.md stamp/restore, build.sh's version validation
 bash scripts/test-release-checks.sh              # scripts/lib/release-checks.sh helpers against throwaway git repos
 bash scripts/test-replace-bundle.sh              # install.sh's old-bundle swap, incl. an undeletable old bundle
+bash scripts/test-install.sh                     # install.sh/uninstall.sh refusals and pluginkit handling, against a fake /Applications
+bash scripts/test-signature-checks.sh            # scripts/lib/signature-checks.sh against ad-hoc re-signed binaries
 bash scripts/test-check-bundle-identifiers.sh    # check-bundle-identifiers.sh's mismatch detection
 bash scripts/check-bundle-identifiers.sh         # Swift constants vs project.yml, install/uninstall scripts, Info.plists and (if built) bundles
 ```
 
 `xcodebuild test` only builds `EPSPreviewTests` (which compiles `Sources/Shared`
-plus `Sources/RenderService/PeerTrust.swift` directly) — the scheme deliberately
+plus `Sources/RenderService`'s `PeerTrust.swift`, `ServiceDelegate.swift` and
+`RenderService.swift` directly) — the scheme deliberately
 excludes the host app, both extensions, and the render XPC service from the
 `test` action. Building them there used to leave
 a full `EPSPreview.app` with embedded Quick Look/Thumbnail extensions (and
@@ -213,7 +216,12 @@ loudly. It also covers `RenderService`'s XPC peer-trust decision
 its top-level-statement-free logic can link into a test target):
 `PeerTrustTests` spawns a second, genuinely running, separately ad-hoc signed
 process outside the fixture app-bundle root and asserts it is refused, the
-negative counterpart to the same check accepting a peer inside that root. The
+negative counterpart to the same check accepting a peer inside that root.
+`ServiceDelegateTests` (`ServiceDelegate.swift`, split out of `main.swift` for
+the same reason) asserts an untrusted connection is refused with nothing
+exported on it, and `RenderServiceTests` (`RenderService.swift`) pins the
+refusals made before any Ghostscript runs: a non-regular, empty or oversized
+input, and a staging copy that cannot be created or outgrows the limit. The
 plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
@@ -239,8 +247,17 @@ rejecting a malformed `EPS_MARKETING_VERSION`;
 `scripts/test-release-checks.sh` pins the same helpers
 (`scripts/lib/release-checks.sh`) case by case, including the changelog
 stamp, the `.sha256` file and the printed `gh release create` command (run
-against a stub `gh`); and `scripts/test-replace-bundle.sh` pins `install.sh`
-refusing to install over an old bundle it cannot delete.
+against a stub `gh`); `scripts/test-replace-bundle.sh` pins `install.sh`
+refusing to install over an old bundle it cannot delete;
+`scripts/test-install.sh` pins `install.sh` stopping before anything
+destructive on a missing build, an extension without its embedded
+`RenderService.xpc` or an invalid build-tree signature, dropping a staged copy
+whose signature is invalid, and both `install.sh` and `uninstall.sh` treating a
+failing `pluginkit` as not (de)registered — run from sed-redirected copies
+against a fake `/Applications` and stubbed system tools; and
+`scripts/test-signature-checks.sh` pins `scripts/lib/signature-checks.sh`'s
+sandbox-entitlement and hardened-runtime assertions against binaries re-signed
+ad hoc by the real `codesign` (macOS only).
 `scripts/test-check-bundle-identifiers.sh` pins `check-bundle-identifiers.sh`
 failing on each one-sided identifier rename, against mutated throwaway copies
 of the files it reads (it needs `swift` and `PlistBuddy`, so macOS with Xcode).
@@ -354,7 +371,7 @@ tagging a release.
 | `Sources/Thumbnail` | Thumbnail extension |
 | `Sources/RenderService` | Unsandboxed XPC render helper (runs `gs` under a per-child `sandbox-exec` profile) |
 | `Sources/Shared` | XPC protocol + client, limits, admission + render-outcome rules, Ghostscript locator + sandbox profile (compiled into every target) |
-| `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
+| `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check, connection acceptance and pre-Ghostscript refusals (`PeerTrust.swift`, `ServiceDelegate.swift`, `RenderService.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `CHANGELOG.md` | Release history; `## [Unreleased]` collects entries for the next release |
 | `MANUAL-TESTING.md` | Manual Quick Look/Finder end-to-end checklist, run before each release |
 | `make_build.sh`, `make_install.sh`, `make_release.sh` | Repo-root shortcuts for `scripts/build.sh`, `scripts/make_install.sh`, `scripts/package-release.sh` |

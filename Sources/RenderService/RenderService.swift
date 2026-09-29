@@ -106,7 +106,11 @@ final class RenderService: NSObject, RenderProtocol {
     ///
     /// The copy is capped as well as the `fstat` that precedes it, because a
     /// file on a volume someone else controls can grow between the two.
-    private static func stage(_ input: FileHandle, atPath path: String) throws {
+    ///
+    /// Not `private`: neither of its failures (an uncreatable staging file, an
+    /// input that grew past the cap after `fstat`) can be provoked through
+    /// `renderEPSToPDF`, so `RenderServiceTests` calls this directly.
+    static func stage(_ input: FileHandle, atPath path: String) throws {
         guard FileManager.default.createFile(atPath: path, contents: nil,
                                              attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown)

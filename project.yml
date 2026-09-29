@@ -134,10 +134,11 @@ targets:
   # floor, admission counter, render-outcome rules, page geometry and preview
   # paging) plus fixture-backed coverage for BundleLayout, thumbnail geometry
   # and thumbnail drawing (the Retina scale / transform chain), and
-  # RenderService's XPC peer-trust decision (PeerTrust.swift, compiled in as
-  # a single file).
+  # RenderService's XPC peer-trust decision, connection acceptance and
+  # pre-Ghostscript refusals (PeerTrust.swift, ServiceDelegate.swift and
+  # RenderService.swift, compiled in as single files).
   #
-  # It compiles Sources/Shared (and that one RenderService file) itself
+  # It compiles Sources/Shared (and those RenderService files) itself
   # rather than depending on one of the app targets: everything else under
   # test lives there, and a dependency on EPSPreview would drag the host
   # app's Info.plist / entitlements / signing into a plain library test
@@ -156,8 +157,11 @@ targets:
       - path: Sources/Shared
       # Not the whole RenderService target (that would drag in main.swift's
       # top-level executable statements, which Swift forbids linking into a
-      # test target) -- just the one file PeerTrustTests exercises.
+      # test target) -- just the files PeerTrustTests, ServiceDelegateTests
+      # and RenderServiceTests exercise.
       - path: Sources/RenderService/PeerTrust.swift
+      - path: Sources/RenderService/ServiceDelegate.swift
+      - path: Sources/RenderService/RenderService.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangyanbo.EPSPreview.Tests
@@ -170,11 +174,12 @@ schemes:
       # The host app, both extensions, and the render XPC service are
       # excluded from the `test` action (everything but that: run, profile,
       # analyze, archive) so `xcodebuild test` only ever builds
-      # EPSPreviewTests, which compiles Sources/Shared (plus one
-      # RenderService file, PeerTrust.swift) directly and needs none of
-      # them. Building them for `test` used to put a full
-      # EPSPreview.app with embedded Quick Look/Thumbnail extensions (and
-      # RenderService) into DerivedData on every test run — and macOS's
+      # EPSPreviewTests, which compiles Sources/Shared (plus three
+      # RenderService files: PeerTrust.swift, ServiceDelegate.swift and
+      # RenderService.swift) directly and needs none of them. Building
+      # them for `test` used to put a full EPSPreview.app with embedded
+      # Quick Look/Thumbnail extensions (and RenderService) into
+      # DerivedData on every test run — and macOS's
       # LaunchServices auto-registers any such app it finds on disk, so
       # every test run silently registered a stray duplicate of the real
       # /Applications install.

@@ -63,7 +63,7 @@ final class PeerTrustTests: XCTestCase {
     func testPeerInsideTheAppBundleRootWithADisallowedIdentifierIsRejected() throws {
         // Same location as the trusted case above -- only the signing
         // identifier differs -- so this isolates the requirement half of the
-        // check from the containment half the other three tests cover.
+        // check from the containment half the location-based tests cover.
         let appRoot = workDir.appendingPathComponent("Fixture.app")
         let pid = try spawnSignedPeer(at: "Fixture.app/Contents/MacOS/impostor-peer",
                                        signingIdentifier: "com.example.eps-preview-tests.evil")
@@ -79,6 +79,43 @@ final class PeerTrustTests: XCTestCase {
 
         XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: trustedRoot(appRoot)),
                         "a separately-signed peer outside our app bundle must be refused")
+    }
+
+    // The two remaining refusals -- `SecCodeCopyStaticCode` or `SecCodeCopyPath`
+    // failing for a peer whose dynamic code already validated -- have no
+    // trigger a test can set up without replacing Security.framework itself,
+    // so they stay uncovered here.
+
+    // breaks-if: isTrustedPeer stops refusing a peer when it cannot determine its own app root (nil ownAppRoot).
+    func testTrustedPeerIsRejectedWhenTheServiceHasNoAppRoot() throws {
+        // Same peer as the trusted case, so only the missing own root differs.
+        let pid = try spawnSignedPeer(at: "Fixture.app/Contents/MacOS/legit-peer",
+                                       signingIdentifier: BundleIdentifiers.quickLookExtension)
+
+        XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: nil),
+                        "a service that is not inside an app bundle must trust nobody")
+    }
+
+    // breaks-if: isTrustedPeer treats a failing SecCodeCopyGuestWithAttributes (no such process) as trusted.
+    func testPidWithNoProcessIsRejected() {
+        let appRoot = workDir.appendingPathComponent("Fixture.app")
+
+        // Far above macOS's PID_MAX, so no process can ever hold it.
+        XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid_t.max, ownAppRoot: trustedRoot(appRoot)),
+                        "a pid with no process behind it must be refused")
+    }
+
+    // breaks-if: isTrustedPeer's nil-enclosingAppBundlePath guard stops refusing a peer in no `.app` at all.
+    func testPeerWithAnAllowedIdentifierOutsideAnyAppBundleIsRejected() throws {
+        // Unlike testPeerOutsideTheAppBundleRootIsRejected, this peer carries
+        // an allowed identifier, so the requirement passes and only the
+        // containment half can refuse it.
+        let appRoot = workDir.appendingPathComponent("Fixture.app")
+        let pid = try spawnSignedPeer(at: "not-inside-any-app-bundle/legit-looking-peer",
+                                       signingIdentifier: BundleIdentifiers.thumbnailExtension)
+
+        XCTAssertFalse(PeerTrust.isTrustedPeer(pid: pid, ownAppRoot: trustedRoot(appRoot)),
+                        "an allowed identifier outside any app bundle must still be refused")
     }
 
     /// Builds a small, harmless, genuinely running process at `relativePath`
