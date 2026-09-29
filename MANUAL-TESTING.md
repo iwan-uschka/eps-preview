@@ -59,7 +59,10 @@ Add a few more by hand:
 calls your Homebrew `gs` at runtime — it does not exercise the pinned
 Ghostscript and bundled libraries a release DMG ships (see `README.md`'s
 "Build from source" section). Before cutting a release, also build the DMG
-with `bash scripts/package-release.sh`, install `EPSPreview.app` from it the
+with `bash make_release.sh <version>` (see `README.md`'s "Releasing" — it
+stamps `CHANGELOG.md` and only prints the publish commands, so nothing is
+tagged or uploaded until you run them after this checklist passes), install
+`EPSPreview.app` from it the
 way `README.md`'s "Option A" describes (drag into Applications, "Open
 Anyway"), and do this on a machine or account without Homebrew `gs` on
 `PATH` — no automated test exercises the bundled `converter`'s sandbox
@@ -122,7 +125,9 @@ falls back to Finder's default (no preview / generic icon), not a crash.
 
 ## 6. Record the result
 
-Before tagging a release, note in the release notes or PR description: the
+Before tagging a release, note in the release notes (the new version's
+`CHANGELOG.md` section, before you commit it — `gh release create` publishes
+that section) or PR description: the
 macOS version tested (this project supports macOS 14+ and specifically
 targets 15/Sequoia and 26/Tahoe — test on whichever you have, ideally all
 over time) and pass/fail for each section

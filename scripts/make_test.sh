@@ -45,8 +45,16 @@ echo "── refresh-thumbnails.sh tests ──"
 bash scripts/test-refresh-thumbnails.sh
 
 echo
-echo "── package-release.sh / build.sh version-validation tests ──"
+echo "── package-release.sh guards / build.sh version-validation tests ──"
 bash scripts/test-package-release.sh
+
+echo
+echo "── release-checks.sh (preflight, CHANGELOG.md stamp/restore) tests ──"
+bash scripts/test-release-checks.sh
+
+echo
+echo "── replace-bundle.sh (install.sh's bundle swap) tests ──"
+bash scripts/test-replace-bundle.sh
 
 echo
 echo "── check-bundle-identifiers.sh tests ──"

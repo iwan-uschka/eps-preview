@@ -90,8 +90,9 @@ xattr -dr com.apple.quarantine "$TMP_DEST" 2>/dev/null || true
 codesign --verify --deep --strict "$TMP_DEST" || {
   rm -rf "$TMP_DEST"
   echo "error: signature invalid in the copy made for $DEST — rebuild with: bash scripts/build.sh"; exit 1; }
-rm -rf "$DEST"
-mv "$TMP_DEST" "$DEST"
+# shellcheck source=lib/replace-bundle.sh disable=SC1091
+. "$ROOT/scripts/lib/replace-bundle.sh"
+replace_bundle "$TMP_DEST" "$DEST" || exit 1
 echo "  ✓ signature valid at $DEST"
 
 echo "── Registering extensions ──"

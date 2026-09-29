@@ -1,31 +1,102 @@
 #!/usr/bin/env bash
 # Build a self-contained, drag-to-install release:
+#   - checks the release can go ahead (clean tree, new tag, non-empty
+#     `## [Unreleased]` in CHANGELOG.md) before touching anything
+#   - stamps CHANGELOG.md: `## [Unreleased]` becomes `## [<version>] - <date>`
+#     under a fresh, empty `## [Unreleased]`
 #   - builds EPSPreview.app
 #   - embeds a self-contained Ghostscript (no Homebrew needed at runtime)
-#   - re-signs (ad-hoc) and produces dist/EPSPreview-<version>.dmg
+#   - re-signs (ad-hoc) and produces dist/EPSPreview-<version>.dmg plus its
+#     dist/EPSPreview-<version>.dmg.sha256
+#   - prints (never runs) the commit/push and `gh release create` commands
+#     that publish it
+#
+# Any failure after the stamp restores CHANGELOG.md byte for byte, so a failed
+# run can simply be re-run.
 #
 # The .dmg is ad-hoc signed (no Apple Developer Program), so first launch
 # still needs the user to approve it once in System Settings → Privacy &
 # Security. See the bundled INSTALL.txt file.
+#
+# Usage: bash scripts/package-release.sh <version>   (or: bash make_release.sh <version>)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-VERSION="${1:-1.0.0}"
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  echo "error: version must be MAJOR.MINOR.PATCH (got '$VERSION')"
-  echo "       usage: bash scripts/package-release.sh [version]"
-  exit 1; }
+# shellcheck source=lib/release-checks.sh disable=SC1091
+. "$ROOT/scripts/lib/release-checks.sh"
+
+usage() { echo "       usage: bash scripts/package-release.sh <version>   (e.g. 1.2.0)"; }
+# No default: a forgotten argument must not silently re-release some fixed
+# version.
+VERSION="${1:-}"
+[ -n "$VERSION" ] || {
+  echo "error: version argument required (MAJOR.MINOR.PATCH)"
+  usage; exit 1; }
+release_version_valid "$VERSION" || { usage; exit 1; }
+
+CHANGELOG="CHANGELOG.md"
+release_preflight "$VERSION" "$CHANGELOG" || exit 1
 
 APP="build/Build/Products/Release/EPSPreview.app"
+DMG="dist/EPSPreview-$VERSION.dmg"
+# Built and verified under a hidden temp name, then moved to $DMG only once
+# every check in the verify step has passed — so a failed run never leaves an
+# image under the release name. The temp name must itself end in .dmg, or
+# `hdiutil create` appends one.
+PARTIAL="dist/.EPSPreview-$VERSION.partial.dmg"
 
-echo "════ 1/5  Build app ════"
+# One EXIT trap for every piece of cleanup, driven by state variables, so no
+# later step replaces an earlier step's cleanup by installing its own trap.
+CHANGELOG_BACKUP=""
+BACKED_UP=0
+DMG_PLACED=0
+RELEASED=0
+MOUNT=""
+MOUNTED=0
+cleanup_mount() {
+  # Nothing to detach when the attach itself failed; only the mountpoint dir remains.
+  if [ "$MOUNTED" = 1 ]; then
+    hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 \
+      || hdiutil detach "$MOUNT" -force -quiet >/dev/null 2>&1 \
+      || echo "warning: could not detach $MOUNT; run: hdiutil detach '$MOUNT' -force" >&2
+  fi
+  rmdir "$MOUNT" 2>/dev/null || true
+  MOUNT=""
+  MOUNTED=0
+}
+on_exit() {
+  if [ -n "$MOUNT" ]; then cleanup_mount; fi
+  rm -f "$PARTIAL"
+  if [ "$RELEASED" != 1 ]; then
+    if [ "$DMG_PLACED" = 1 ]; then rm -f "$DMG" "$DMG.sha256"; fi
+    if [ "$BACKED_UP" = 1 ] && release_restore_changelog "$CHANGELOG_BACKUP" "$CHANGELOG"; then
+      echo "  release failed — $CHANGELOG restored to its pre-release state" >&2
+    fi
+  fi
+  if [ -n "$CHANGELOG_BACKUP" ]; then rm -f "$CHANGELOG_BACKUP"; fi
+}
+trap on_exit EXIT
+
+echo "════ 1/6  Stamp $CHANGELOG ════"
+# Stamped before the build, so the tree the DMG is built from already carries
+# its own release entry. The preflight's clean-tree check ran first, so after
+# this the only uncommitted changes are the release's own.
+CHANGELOG_BACKUP="$(mktemp)"
+cp "$CHANGELOG" "$CHANGELOG_BACKUP"
+BACKED_UP=1
+RELEASE_DATE="$(date +%Y-%m-%d)"
+release_stamp_changelog "$VERSION" "$RELEASE_DATE" "$CHANGELOG" || exit 1
+echo "  ✓ ## [Unreleased] → ## [$VERSION] - $RELEASE_DATE"
+
+echo
+echo "════ 2/6  Build app ════"
 # build.sh stamps $VERSION into every bundle's CFBundleShortVersionString
 # before it signs; doing it here would break the nested seals it just made.
 EPS_MARKETING_VERSION="$VERSION" bash scripts/build.sh
 
 echo
-echo "════ 2/5  Embed self-contained Ghostscript ════"
+echo "════ 3/6  Embed self-contained Ghostscript ════"
 GSTMP="$(mktemp -d)/gs"
 bash scripts/bundle-ghostscript.sh "$GSTMP"
 # Split: Mach-O (binary + libs) into Helpers/, the resource tree into
@@ -44,7 +115,7 @@ cp -R "$GSTMP/licenses" "$APP/Contents/Resources/ghostscript/licenses"
 rm -rf "$(dirname "$GSTMP")"
 
 echo
-echo "════ 3/5  Re-seal the app (added Contents/Helpers) ════"
+echo "════ 4/6  Re-seal the app (added Contents/Helpers) ════"
 # Adding Helpers/ invalidated the app's outer seal; re-sign the host app so
 # the bundled gs is covered. (Nested extensions/service stay as signed.)
 codesign --force --sign - --timestamp=none --options runtime \
@@ -81,7 +152,7 @@ assert_hardened_runtime "$APP/Contents/PlugIns/EPSThumbnail.appex/Contents/XPCSe
 echo "  ✓ hardened runtime on every signed bundle"
 
 echo
-echo "════ 4/5  Build DMG ════"
+echo "════ 5/6  Build DMG ════"
 STAGE="$(mktemp -d)/EPS Preview"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/EPSPreview.app"
@@ -104,35 +175,17 @@ No Homebrew or Ghostscript install needed — both are bundled inside the app.
 EOF
 
 mkdir -p dist
-DMG="dist/EPSPreview-$VERSION.dmg"
-# Built and verified under a hidden temp name, then moved to $DMG only once
-# every check in step 5 has passed — so a failed run never leaves an image
-# under the release name. The temp name must itself end in .dmg, or
-# `hdiutil create` appends one.
-PARTIAL="dist/.EPSPreview-$VERSION.partial.dmg"
-rm -f "$DMG" "$PARTIAL"
-trap 'rm -f "$PARTIAL"' EXIT
+rm -f "$DMG" "$DMG.sha256" "$PARTIAL"
 hdiutil create -volname "EPS Preview" -srcfolder "$STAGE" \
   -ov -format UDZO "$PARTIAL" >/dev/null
 rm -rf "$(dirname "$STAGE")"
 
 echo
-echo "════ 5/5  Verify DMG ════"
+echo "════ 6/6  Verify DMG ════"
 hdiutil verify "$PARTIAL" >/dev/null || {
   echo "error: image for $DMG failed hdiutil verify"; exit 1; }
 echo "  ✓ image checksum valid"
 MOUNT="$(mktemp -d)"
-MOUNTED=0
-cleanup_mount() {
-  # Nothing to detach when the attach itself failed; only the mountpoint dir remains.
-  if [ "$MOUNTED" = 1 ]; then
-    hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 \
-      || hdiutil detach "$MOUNT" -force -quiet >/dev/null 2>&1 \
-      || echo "warning: could not detach $MOUNT; run: hdiutil detach '$MOUNT' -force" >&2
-  fi
-  rmdir "$MOUNT" 2>/dev/null || true
-}
-trap 'cleanup_mount; rm -f "$PARTIAL"' EXIT
 hdiutil attach "$PARTIAL" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
 MOUNTED=1
 codesign --verify --deep --strict "$MOUNT/EPSPreview.app" || {
@@ -146,9 +199,17 @@ INSTALLED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionStri
   echo "error: app in $DMG reports version $INSTALLED_VERSION, expected $VERSION"; exit 1; }
 echo "  ✓ app signature valid, Ghostscript bundled, reports $INSTALLED_VERSION"
 cleanup_mount
-trap - EXIT
 mv "$PARTIAL" "$DMG"
+DMG_PLACED=1
+release_write_checksum "$DMG" || exit 1
+RELEASED=1
 
 echo
-echo "✓ Release built: $DMG ($(du -h "$DMG" | cut -f1))"
-shasum -a 256 "$DMG"
+echo "✓ Release built: $DMG ($(du -h "$DMG" | cut -f1)), checksum in $DMG.sha256"
+echo
+# The tree was clean before the stamp, so everything modified now is the
+# release's own doing: CHANGELOG.md, plus NOTICE.md if bundle-ghostscript.sh
+# regenerated its third-party table.
+CHANGED="$(git status --porcelain | cut -c4- | tr '\n' ' ')"
+# shellcheck disable=SC2086 # one path per word, none contain spaces
+release_print_next_steps "$VERSION" "$DMG" ${CHANGED:-$CHANGELOG}
