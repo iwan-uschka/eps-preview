@@ -47,13 +47,33 @@ When you **build from source** (`scripts/build.sh`) instead of using a
 release, Ghostscript is **not** bundled — the app calls the copy you install
 yourself via Homebrew — so the build-from-source app is MIT all the way down.
 
-Release builds let you substitute your own Ghostscript for the bundled one
-without modifying the app bundle or its signature: create an empty file at
-`~/Library/Application Support/EPSPreview/force-system-gs`, and the render
-service will skip the bundled copy and use a system install (Homebrew /
-MacPorts) instead, vetted the same way as for build-from-source users.
+### How the licenses fit together
 
-Because the release binary combines this MIT code with AGPL Ghostscript, the
-**release artifact as distributed is covered by the AGPL-3.0** with respect to
-Ghostscript. The corresponding Ghostscript source is available at the links
-above.
+- EPS Preview's own code stays **MIT**, in the release just as in a source
+  build. The release is a collection of separate programs distributed on one
+  medium, which is "mere aggregation" in the sense of GPLv3 §5. The bundled
+  AGPL/GPL/LGPL components therefore do not relicense the app's code. The
+  app runs Ghostscript as a separate child process that talks to it over
+  pipes and file descriptors. It does not link Ghostscript into the Swift
+  code.
+- Every bundled component stays under **its own** license, and the release
+  as a whole may only be redistributed while honouring all of them. That
+  means reproducing each project's copyright notice (this file), conveying
+  the license texts (shipped on the `.dmg` and inside the app under
+  `EPSPreview.app/Contents/Resources/`), and making the corresponding source
+  of the copyleft components available (links above). This applies in
+  particular to Ghostscript's AGPL-3.0.
+- Nothing is modified at the source level. Ghostscript is built from
+  unmodified upstream source, differing only in configure flags
+  (`--without-tesseract` and similar). The shared libraries are Homebrew's
+  own builds, with their dylib load paths rewritten by `install_name_tool`
+  so they resolve inside the app bundle, and all binaries ad-hoc code-signed.
+- The release never requires running the bundled Ghostscript. You can
+  substitute your own without modifying the app bundle or its signature:
+  create an empty file at
+  `~/Library/Application Support/EPSPreview/force-system-gs`, and the render
+  service skips the bundled copy and uses a system install (Homebrew /
+  MacPorts) instead, vetted the same way as for build-from-source users.
+
+This is the project's own good-faith reading of how the release is put
+together, written down so you can check it. It is not legal advice.
