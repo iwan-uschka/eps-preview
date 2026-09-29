@@ -368,9 +368,11 @@ intentionally not committed.
 
 ## License
 
-This project's code is **MIT** — see [LICENSE](LICENSE).
+This project's code is **MIT** — see [LICENSE](LICENSE), in source builds and
+releases alike.
 
 Build-from-source uses your own Homebrew Ghostscript (nothing AGPL is
-distributed). The downloadable **release** bundles a self-contained
-Ghostscript, which is **AGPL-3.0**; see [NOTICE.md](NOTICE.md) for details and
-source links.
+distributed). The downloadable **release** additionally bundles a
+self-contained Ghostscript as a separate program under its own **AGPL-3.0**
+license (mere aggregation); see [NOTICE.md](NOTICE.md) for details and source
+links.

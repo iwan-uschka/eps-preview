@@ -58,14 +58,17 @@ yourself via Homebrew — so the build-from-source app is MIT all the way down.
   code.
 - Every bundled component stays under **its own** license, and the release
   as a whole may only be redistributed while honouring all of them. That
-  means reproducing each project's copyright notice (this file), conveying
-  the license texts (shipped on the `.dmg` and inside the app under
-  `EPSPreview.app/Contents/Resources/`), and making the corresponding source
+  means reproducing each project's copyright notice (this file, which is
+  published in the source repository), conveying the license texts (shipped
+  inside the app under
+  `EPSPreview.app/Contents/Resources/ghostscript/licenses/`), and making the
+  corresponding source
   of the copyleft components available (links above). This applies in
   particular to Ghostscript's AGPL-3.0.
 - Nothing is modified at the source level. Ghostscript is built from
-  unmodified upstream source, differing only in configure flags
-  (`--without-tesseract` and similar). The shared libraries are Homebrew's
+  unpatched upstream source; the build only deletes its vendored copies of
+  libraries Homebrew already provides (so the system ones are linked instead)
+  and sets configure flags (`--without-tesseract` and similar). The shared libraries are Homebrew's
   own builds, with their dylib load paths rewritten by `install_name_tool`
   so they resolve inside the app bundle, and all binaries ad-hoc code-signed.
 - The release never requires running the bundled Ghostscript. You can
