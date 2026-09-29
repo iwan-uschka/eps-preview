@@ -101,7 +101,8 @@ own render starts.
 
 ### Option A — Download (recommended, nothing to build)
 
-1. Download `EPSPreview-x.y.z.dmg` from the
+1. Download `EPSPreview-x.y.z.dmg` (and optionally `EPSPreview-x.y.z.dmg.sha256`;
+   check it with `shasum -a 256 -c EPSPreview-x.y.z.dmg.sha256`) from the
    [**Releases**](https://github.com/Zhangyanbo/eps-preview/releases) page.
 2. Open the `.dmg` and drag **EPSPreview.app** onto **Applications**.
 3. Open it once. macOS will block it the first time because the app isn't
@@ -111,6 +112,10 @@ own render starts.
 
 The release is **self-contained** — Ghostscript is bundled, so you do **not**
 need Homebrew or any other install. Works on macOS 14+ (Apple Silicon).
+
+> Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
+> Developer Program membership ($99/yr) to notarize the app. The project is
+> otherwise free and needs no account to build, sign, or run.
 
 ### Option B — Build from source
 
@@ -128,10 +133,9 @@ bash scripts/make_install.sh    # build, install to /Applications, register exte
 
 The repo root also has `make_build.sh`, `make_install.sh` and `make_release.sh`
 — one-liners that `cd` to the repo root and hand their arguments to
-`scripts/build.sh`, `scripts/install.sh` and `scripts/package-release.sh`
-(see [Releasing](#releasing)). Unlike `scripts/make_install.sh`, the root
-`make_install.sh` does **not** build first: it installs whatever
-`bash make_build.sh` last produced. It refuses `sudo` the same way.
+`scripts/build.sh`, `scripts/make_install.sh` and `scripts/package-release.sh`
+(see [Releasing](#releasing)); the root `make_install.sh` runs
+`scripts/make_install.sh`, so it builds first and refuses `sudo` the same way.
 
 `scripts/make_uninstall.sh` reverses `make_install.sh`. **Never run
 `make_install.sh` / `make_uninstall.sh` with `sudo`** — they refuse outright
@@ -144,9 +148,11 @@ LaunchServices database, invisible to your actual login session, which
 silently breaks Finder's thumbnails even though the install "succeeds". If a
 past `sudo` run already left a root-owned `/Applications/EPSPreview.app`
 behind, `install.sh` cannot remove it: it stops with an error (removing its
-staging copy) instead of installing into a half-deleted bundle, and tells you
-to clear it once with `sudo rm -rf /Applications/EPSPreview.app` before
-running `make_install.sh` again — that one-time cleanup step is the only
+staging copy) instead of installing into a half-deleted bundle. It prints
+`rm`'s own error and, if that is "Permission denied", tells you to clear the
+bundle once with `sudo rm -rf /Applications/EPSPreview.app` before running
+`make_install.sh` again (any other error is yours to fix first) — that
+one-time cleanup step is the only
 place `sudo` belongs in this workflow, and the script never runs it for you.
 
 `install.sh` writes to `/Applications`, which needs admin-group membership.
@@ -282,14 +288,16 @@ bash make_release.sh 1.2.0      # = bash scripts/package-release.sh 1.2.0
 The version is required and must be plain `MAJOR.MINOR.PATCH` (no `v`
 prefix, no `-rc1` suffix). Before it changes anything or starts the build,
 the script refuses to run if the working tree is not clean, if tag `v1.2.0`
-already exists locally, or if `CHANGELOG.md` is missing or its
-`## [Unreleased]` section is empty (blank lines and bare `###` subheadings
+already exists locally, or if `CHANGELOG.md` is missing, already has a
+`## [1.2.0]` section, or its `## [Unreleased]` section is empty (blank lines and bare `###` subheadings
 don't count). It then renames `## [Unreleased]` to `## [1.2.0] - <today>`
 under a fresh, empty `## [Unreleased]`, builds, and writes
 `dist/EPSPreview-1.2.0.dmg` plus `dist/EPSPreview-1.2.0.dmg.sha256` (check it
 with `shasum -a 256 -c EPSPreview-1.2.0.dmg.sha256` from the download
 directory). If any step after the stamp fails, `CHANGELOG.md` is restored
-byte for byte, so just fix the cause and rerun.
+byte for byte. `NOTICE.md` is not: if the build already regenerated its
+third-party table, run `git checkout NOTICE.md` too, then fix the cause and
+rerun.
 
 On success it prints, but does not run, the commands that publish the
 release: `git add` of the files it changed (`CHANGELOG.md`, plus `NOTICE.md`
@@ -299,10 +307,6 @@ checksum with the `## [1.2.0]` changelog section as release notes. `gh`
 creates the `v1.2.0` tag on the pushed commit, so there is no separate
 `git tag` step. Run through [MANUAL-TESTING.md](MANUAL-TESTING.md) against the
 DMG before publishing.
-
-> Why "Open Anyway"? Removing that one-time prompt entirely requires an Apple
-> Developer Program membership ($99/yr) to notarize the app. The project is
-> otherwise free and needs no account to build, sign, or run.
 
 ## Uninstall
 
@@ -353,7 +357,7 @@ tagging a release.
 | `Tests` | XCTest unit tests for `Sources/Shared` and RenderService's peer-trust check (`PeerTrust.swift`), plus the committed EPS fixtures in `Tests/Fixtures` (`EPSPreviewTests` target) |
 | `CHANGELOG.md` | Release history; `## [Unreleased]` collects entries for the next release |
 | `MANUAL-TESTING.md` | Manual Quick Look/Finder end-to-end checklist, run before each release |
-| `make_build.sh`, `make_install.sh`, `make_release.sh` | Repo-root shortcuts for `scripts/build.sh`, `scripts/install.sh`, `scripts/package-release.sh` |
+| `make_build.sh`, `make_install.sh`, `make_release.sh` | Repo-root shortcuts for `scripts/build.sh`, `scripts/make_install.sh`, `scripts/package-release.sh` |
 | `scripts/` | Build / install / uninstall / thumbnail-refresh / release packaging |
 | `githooks/` | Opt-in local pre-commit / pre-push hooks |
 | `.swiftlint.yml` | Enforced SwiftLint baseline for `Sources` and `Tests` |

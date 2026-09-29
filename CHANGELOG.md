@@ -10,6 +10,18 @@ release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/package-release.sh` requires an explicit `MAJOR.MINOR.PATCH` version
+  (no default), refuses a dirty tree, an existing tag or changelog section for
+  that version, or an empty `## [Unreleased]`, stamps `CHANGELOG.md` and writes a `.dmg.sha256`.
+- `scripts/install.sh` stops with instructions instead of installing into a
+  half-deleted, root-owned `/Applications/EPSPreview.app`.
+
+### Added
+
+- Repo-root `make_build.sh`, `make_install.sh` and `make_release.sh` wrappers.
+
 ## [1.0.0] - 2026-06-26
 
 ### Added

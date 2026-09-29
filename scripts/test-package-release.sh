@@ -62,7 +62,9 @@ done
 # that it ran and whether CHANGELOG.md was already stamped, then exits 42 —
 # the release stops there, before anything real is built.
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/eps-package-release-test.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 CHANGELOG_WITH_ENTRY='# Changelog
 
@@ -94,7 +96,9 @@ new_repo() {
   [ $# -eq 0 ] || printf '%s' "$1" > "$REPO/CHANGELOG.md"
   git init -q "$REPO"
   git -C "$REPO" add -A
-  git -C "$REPO" -c user.name=t -c user.email=t@example.invalid commit -qm init
+  git -C "$REPO" -c user.name=t -c user.email=t@example.invalid \
+    -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm init \
+    || { echo "fixture commit failed" >&2; exit 2; }
   rm -f "$WORK/saw-stamp"
 }
 
@@ -135,6 +139,7 @@ else
     "status=$(git -C "$REPO" status --porcelain) out=$OUT"
 fi
 # Idempotency: the restored tree passes the preflight again and re-stamps.
+rm -f "$WORK/saw-stamp"
 run_release 12.34.567
 if [ "$RC" -eq 42 ] && [ -e "$WORK/saw-stamp" ] && changelog_untouched; then
   pass "a release re-run after a failed build gets past the preflight again"

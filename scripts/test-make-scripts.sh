@@ -4,10 +4,10 @@
 # and must otherwise delegate to build.sh/install.sh/uninstall.sh in order;
 # make_test.sh must refuse to run when xcodegen isn't on PATH; the repo-root
 # make_build.sh/make_install.sh/make_release.sh must forward their arguments
-# and exit status to build.sh/install.sh/package-release.sh, and the root
-# make_install.sh must refuse to run as root too. Follows the
-# PATH-stub technique in scripts/test-githooks.sh — a stubbed `id` stands in
-# for actually running under sudo, so this never needs real root.
+# and exit status to build.sh/scripts/make_install.sh/package-release.sh, and
+# the root make_install.sh must reach scripts/make_install.sh's root guard.
+# Follows the PATH-stub technique in scripts/test-githooks.sh — a stubbed `id`
+# stands in for actually running under sudo, so this never needs real root.
 #
 # make_install.sh/make_uninstall.sh/make_test.sh are run from a throwaway
 # copy of scripts/, alongside fake build.sh/install.sh/uninstall.sh, rather
@@ -147,7 +147,7 @@ fi
 TOP="$WORK/fake-top"
 mkdir -p "$TOP/scripts"
 cp "$ROOT/make_build.sh" "$ROOT/make_install.sh" "$ROOT/make_release.sh" "$TOP/"
-for real in build.sh install.sh package-release.sh; do
+for real in build.sh make_install.sh package-release.sh; do
   {
     printf '#!/bin/sh\n'
     printf 'pwd > "%s/%s.cwd"\n' "$WORK" "$real"
@@ -158,7 +158,7 @@ done
 TOP_REAL="$(cd "$TOP" && pwd -P)"
 
 # breaks-if: a root wrapper drops "$@", stops exec'ing (masking the exit code) or skips its cd
-for pair in make_build.sh:build.sh make_install.sh:install.sh make_release.sh:package-release.sh; do
+for pair in make_build.sh:build.sh make_install.sh:make_install.sh make_release.sh:package-release.sh; do
   wrapper="${pair%%:*}"; real="${pair#*:}"
   rm -f "$WORK/$real.cwd" "$WORK/$real.args"
   RC=0
@@ -173,18 +173,30 @@ for pair in make_build.sh:build.sh make_install.sh:install.sh make_release.sh:pa
   fi
 done
 
-# breaks-if: the repo-root make_install.sh loses its no-sudo guard
-rm -f "$WORK/install.sh.args"
+# The root make_install.sh carries no guard of its own: it must reach the real
+# scripts/make_install.sh, so running it as root still stops before build.sh
+# or install.sh.
+TOP2="$WORK/fake-top-guard"
+mkdir -p "$TOP2/scripts"
+cp "$ROOT/make_install.sh" "$TOP2/"
+cp "$ROOT/scripts/make_install.sh" "$TOP2/scripts/"
+for real in build.sh install.sh; do
+  printf '#!/bin/sh\ntouch "%s/guard-reached-%s"\n' "$WORK" "$real" > "$TOP2/scripts/$real"
+done
+# breaks-if: the repo-root make_install.sh stops delegating to scripts/make_install.sh (e.g. runs install.sh directly), bypassing its no-sudo guard
+rm -f "$WORK"/guard-reached-*
 RC=0
-OUT="$(env PATH="$STUB:$PATH" bash "$TOP/make_install.sh" 2>&1)" || RC=$?
-if [ "$RC" -eq 1 ] && [[ "$OUT" == *"do not run this with sudo"* ]] && [ ! -e "$WORK/install.sh.args" ]; then
-  pass "repo-root make_install.sh refuses to run as root before reaching install.sh"
+OUT="$(env PATH="$STUB:$PATH" bash "$TOP2/make_install.sh" 2>&1)" || RC=$?
+if [ "$RC" -eq 1 ] && [[ "$OUT" == *"do not run this with sudo"* ]] \
+   && ! ls "$WORK"/guard-reached-* >/dev/null 2>&1; then
+  pass "repo-root make_install.sh reaches scripts/make_install.sh's root guard before build.sh/install.sh"
 else
-  fail "repo-root make_install.sh refuses to run as root before reaching install.sh" "rc=$RC out=$OUT"
+  fail "repo-root make_install.sh reaches scripts/make_install.sh's root guard before build.sh/install.sh" "rc=$RC out=$OUT"
 fi
 
 # The real wrapper against the real package-release.sh: its usage error must
 # come back through make_release.sh unchanged (exit 1, same message).
+# breaks-if: make_release.sh stops forwarding to package-release.sh, or package-release.sh's missing-version guard/message changes
 RC=0
 OUT="$(bash "$ROOT/make_release.sh" 2>&1)" || RC=$?
 if [ "$RC" -eq 1 ] && [[ "$OUT" == *"version argument required"* ]]; then

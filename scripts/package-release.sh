@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a self-contained, drag-to-install release:
-#   - checks the release can go ahead (clean tree, new tag, non-empty
-#     `## [Unreleased]` in CHANGELOG.md) before touching anything
+#   - checks the release can go ahead (clean tree, new tag, no existing
+#     `## [<version>]` and a non-empty `## [Unreleased]` in CHANGELOG.md)
+#     before touching anything
 #   - stamps CHANGELOG.md: `## [Unreleased]` becomes `## [<version>] - <date>`
 #     under a fresh, empty `## [Unreleased]`
 #   - builds EPSPreview.app
@@ -11,8 +12,10 @@
 #   - prints (never runs) the commit/push and `gh release create` commands
 #     that publish it
 #
-# Any failure after the stamp restores CHANGELOG.md byte for byte, so a failed
-# run can simply be re-run.
+# Any failure after the stamp restores CHANGELOG.md byte for byte. NOTICE.md is
+# not restored: if step 3 (bundle-ghostscript.sh) already regenerated its
+# third-party table, run `git checkout NOTICE.md` before re-running, or the
+# clean-tree check refuses.
 #
 # The .dmg is ad-hoc signed (no Apple Developer Program), so first launch
 # still needs the user to approve it once in System Settings → Privacy &

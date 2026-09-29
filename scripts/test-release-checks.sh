@@ -11,7 +11,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/eps-release-checks-test.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # shellcheck source=lib/release-checks.sh disable=SC1091
 . "$ROOT/scripts/lib/release-checks.sh"
 
@@ -54,7 +56,11 @@ new_repo() {
   git init -q "$REPO"
   printf '%s' "$1" > "$REPO/CHANGELOG.md"
   git -C "$REPO" add CHANGELOG.md
-  git -C "$REPO" -c user.name=t -c user.email=t@example.invalid commit -qm init
+  # A global gpgsign or commit hook must not leave the fixture without a
+  # commit, which would make later dirty-tree and tag cases fail misleadingly.
+  git -C "$REPO" -c user.name=t -c user.email=t@example.invalid \
+    -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm init \
+    || { echo "fixture commit failed" >&2; exit 2; }
 }
 
 # --- release_version_valid: boundaries ------------------------------------
@@ -150,12 +156,42 @@ if [ "$RC" -eq 1 ] && [[ "$OUT" == *"tag v1.1.0 already exists"* ]]; then
 else
   fail "release_preflight refuses a version whose tag exists" "rc=$RC out=$OUT"
 fi
-# The tag lookup is exact: v1.1.0 existing must not block 1.1.1 or 1.1.
+# The tag lookup is exact: an existing v1.1.10 must not block 1.1.1, the case
+# a glob or prefix match would get wrong.
+# breaks-if: release_preflight looks tags up by prefix or glob instead of exact name
+git -C "$REPO" tag v1.1.10
 run_in_repo release_preflight 1.1.1 CHANGELOG.md
 if [ "$RC" -eq 0 ]; then
   pass "release_preflight's tag check matches the exact tag only"
 else
   fail "release_preflight's tag check matches the exact tag only" "rc=$RC out=$OUT"
+fi
+
+# breaks-if: release_preflight drops the existing-changelog-section check
+new_repo "$CHANGELOG_WITH_ENTRY"
+run_in_repo release_preflight 1.0.0 CHANGELOG.md
+if [ "$RC" -eq 1 ] && [[ "$OUT" == *"already has a '## [1.0.0]' section"* ]]; then
+  pass "release_preflight refuses a version whose changelog section exists without a tag"
+else
+  fail "release_preflight refuses a version whose changelog section exists without a tag" "rc=$RC out=$OUT"
+fi
+
+# breaks-if: the existing-section check matches `## [<version>]` anywhere in a line, or treats the dots as wildcards
+new_repo '# Changelog
+
+## [Unreleased]
+
+- Mentions `## [1.1.0]` mid-line, which is not a heading.
+
+## [1x1x0] - 2026-01-01
+
+- Decoy.
+'
+run_in_repo release_preflight 1.1.0 CHANGELOG.md
+if [ "$RC" -eq 0 ]; then
+  pass "release_preflight's changelog-section check matches only a line-start heading with literal dots"
+else
+  fail "release_preflight's changelog-section check matches only a line-start heading with literal dots" "rc=$RC out=$OUT"
 fi
 
 # breaks-if: release_preflight drops the empty-Unreleased check
@@ -249,6 +285,7 @@ fi
 
 # The stamped file must pass straight back through the empty-Unreleased
 # guard as empty — the next release starts from nothing.
+# breaks-if: release_stamp_changelog leaves entries under the fresh '## [Unreleased]' heading
 if ! release_unreleased_body "$F" | grep -Eqv '^[[:space:]]*(###.*)?$'; then
   pass "a freshly stamped changelog has an empty Unreleased section"
 else
@@ -288,6 +325,14 @@ if [ "$(grep -c '^## \[2.0.0\]' "$F")" -eq 1 ] && [ "$(grep -c '^## \[Unreleased
   pass "release_stamp_changelog stamps only the first Unreleased heading"
 else
   fail "release_stamp_changelog stamps only the first Unreleased heading" "$(cat "$F")"
+fi
+
+# breaks-if: release_stamp_changelog ignores awk/cat failing (else branch removed)
+OUT="$(release_stamp_changelog 1.1.0 2026-09-29 "$WORK/no-such.md" 2>&1)"; RC=$?
+if [ "$RC" -eq 1 ] && [[ "$OUT" == *"could not stamp $WORK/no-such.md"* ]] && [ ! -e "$WORK/no-such.md" ]; then
+  pass "release_stamp_changelog fails for a missing changelog without creating it"
+else
+  fail "release_stamp_changelog fails for a missing changelog without creating it" "rc=$RC out=$OUT"
 fi
 
 # --- release_restore_changelog: the failed-run idempotency ----------------

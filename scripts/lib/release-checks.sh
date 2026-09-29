@@ -59,6 +59,8 @@ release_changelog_section() {
 #     stamped CHANGELOG.md (plus whatever the build itself regenerates) and
 #     the DMG is built from committed sources;
 #   - tag v<version> does not exist yet (checked locally only — no network);
+#   - CHANGELOG.md has no `## [<version>]` section yet (a hand-stamped file, or
+#     a release that failed after its commit but before its tag);
 #   - `## [Unreleased]` has content. Blank lines and bare `###` subheadings
 #     (an empty `### Added`) do not count: they would publish empty notes.
 #
@@ -80,6 +82,12 @@ release_preflight() {
     return 1; }
   if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
     echo "error: tag v$version already exists — pick a new version."
+    return 1
+  fi
+  # Anchored the same way as RELEASE_SECTION_AWK (index() == 1, dots literal),
+  # since a second `## [<version>]` heading would make it concatenate both.
+  if awk -v v="$version" 'index($0, "## [" v "]") == 1 { found = 1; exit } END { exit !found }' "$changelog"; then
+    echo "error: $changelog already has a '## [$version]' section — pick a new version."
     return 1
   fi
   release_unreleased_body "$changelog" | grep -Eqv '^[[:space:]]*(###.*)?$' || {

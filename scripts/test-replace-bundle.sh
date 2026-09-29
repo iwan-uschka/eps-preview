@@ -13,7 +13,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/eps-replace-bundle-test.XXXXXX")"
 # Give write permission back first, or the cleanup itself fails.
-trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT INT TERM
+trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # shellcheck source=lib/replace-bundle.sh disable=SC1091
 . "$ROOT/scripts/lib/replace-bundle.sh"
 
@@ -68,13 +70,35 @@ else
   # breaks-if: replace_bundle ignores a failing `rm -rf "$dest"`
   OUT="$(replace_bundle "$DEST.installing" "$DEST" 2>&1)"; RC=$?
   if [ "$RC" -eq 1 ] && [[ "$OUT" == *"could not remove the existing $DEST"* ]] \
-     && [[ "$OUT" == *"sudo rm -rf $DEST"* ]] && [[ "$OUT" == *"without sudo"* ]]; then
+     && [[ "$OUT" == *"sudo rm -rf \"$DEST\""* ]] && [[ "$OUT" == *"without sudo"* ]]; then
     pass "replace_bundle fails with the one-time sudo rm instruction when the old bundle won't go"
   else
     fail "replace_bundle fails on an undeletable old bundle" "rc=$RC out=$OUT"
   fi
+  # The hint must show rm's own error and condition the sudo advice on it, so
+  # a failure that is not a permission problem is not blamed on root.
+  # breaks-if: replace_bundle discards rm's error output or offers the sudo remedy unconditionally
+  if [[ "$OUT" == *"Permission denied"* ]] && [[ "$OUT" == *"If \"Permission denied\" appears above"* ]]; then
+    pass "replace_bundle shows rm's error and makes the sudo advice conditional on it"
+  else
+    fail "replace_bundle shows rm's error and makes the sudo advice conditional on it" "out=$OUT"
+  fi
+  # breaks-if: replace_bundle's failure guidance goes back to stdout instead of stderr
+  chmod -R u+w "$DEST"; rm -rf "$DEST"
+  make_bundle "$DEST" old
+  printf 'x\n' > "$DEST/Contents/MacOS/EPSPreview"
+  chmod 0555 "$DEST/Contents/MacOS"
+  make_bundle "$DEST.installing" new
+  STDERR="$(replace_bundle "$DEST.installing" "$DEST" 2>&1 >"$WORK/stdout")"; RC=$?
+  STDOUT="$(cat "$WORK/stdout")"
+  if [ "$RC" -eq 1 ] && [ -z "$STDOUT" ] && [[ "$STDERR" == *"could not remove the existing $DEST"* ]]; then
+    pass "replace_bundle writes its failure guidance to stderr, not stdout"
+  else
+    fail "replace_bundle writes its failure guidance to stderr, not stdout" "rc=$RC stdout=$STDOUT stderr=$STDERR"
+  fi
   # A `mv` onto the surviving directory would have nested the new bundle
   # inside the old one — the half-installed state this guard exists for.
+  # breaks-if: replace_bundle stops refusing when `rm -rf "$dest"` leaves it behind and mv's onto the surviving directory
   if [ ! -e "$DEST/EPSPreview.app.installing" ] && [ ! -e "$DEST/Contents/marker.new" ] \
      && [ -e "$DEST/Contents/MacOS/EPSPreview" ]; then
     pass "replace_bundle does not move the staged bundle into the surviving old one"
@@ -87,6 +111,21 @@ else
     pass "replace_bundle removes the staging copy on failure"
   else
     fail "replace_bundle removes the staging copy on failure" "$DEST.installing still exists"
+  fi
+
+  # The old bundle is gone but the rename itself fails: here a destination
+  # directory without write permission, so `rm -rf` of the absent <dest>
+  # succeeds and only the `mv` into it is refused.
+  mkdir -p "$WORK/ro" "$WORK/stage"
+  chmod 0555 "$WORK/ro"
+  DEST="$WORK/ro/EPSPreview.app"
+  make_bundle "$WORK/stage/EPSPreview.app.installing" new
+  # breaks-if: replace_bundle ignores a failing final `mv` or leaves the staging copy behind
+  OUT="$(replace_bundle "$WORK/stage/EPSPreview.app.installing" "$DEST" 2>&1)"; RC=$?
+  if [ "$RC" -ne 0 ] && [ ! -e "$WORK/stage/EPSPreview.app.installing" ] && [ ! -e "$DEST" ]; then
+    pass "replace_bundle fails and removes the staging copy when the final rename fails"
+  else
+    fail "replace_bundle fails and removes the staging copy when the final rename fails" "rc=$RC out=$OUT"
   fi
 fi
 

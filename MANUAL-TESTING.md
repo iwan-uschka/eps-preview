@@ -68,7 +68,9 @@ Anyway"), and do this on a machine or account without Homebrew `gs` on
 `PATH` — no automated test exercises the bundled `converter`'s sandbox
 profile (`GhostscriptSandboxIntegrationTests` only ever resolves a system
 `gs`), so this is the only check that the bundled-tree sandbox roots are
-right. Then run §2–§5 against that install too.
+right. Then run §2–§5 against that install too. If a section fails, discard
+the stamp (`git checkout CHANGELOG.md NOTICE.md`) before fixing and rerunning
+`make_release.sh`.
 
 ## 2. Finder thumbnails
 
