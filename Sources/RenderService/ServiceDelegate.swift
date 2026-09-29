@@ -14,6 +14,9 @@ final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
 
     func listener(_ listener: NSXPCListener,
                   shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
+        // The pid check is an early filter only: pids can be recycled between
+        // accept and use, so the connection-level code-signing requirement set
+        // below is the authoritative check.
         guard PeerTrust.isTrustedPeer(pid: newConnection.processIdentifier) else {
             Self.log.error(
                 "Rejected XPC connection from untrusted peer pid \(newConnection.processIdentifier, privacy: .public)")

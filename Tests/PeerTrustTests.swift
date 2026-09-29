@@ -81,10 +81,11 @@ final class PeerTrustTests: XCTestCase {
                         "a separately-signed peer outside our app bundle must be refused")
     }
 
-    // The two remaining refusals -- `SecCodeCopyStaticCode` or `SecCodeCopyPath`
-    // failing for a peer whose dynamic code already validated -- have no
-    // trigger a test can set up without replacing Security.framework itself,
-    // so they stay uncovered here.
+    // Three refusals stay uncovered here: a nil `compiledRequirement` (the
+    // constant requirement string always compiles), and `SecCodeCopyStaticCode`
+    // or `SecCodeCopyPath` failing for a peer whose dynamic code already
+    // validated. None has a trigger a test can set up without replacing
+    // Security.framework itself.
 
     // breaks-if: isTrustedPeer stops refusing a peer when it cannot determine its own app root (nil ownAppRoot).
     func testTrustedPeerIsRejectedWhenTheServiceHasNoAppRoot() throws {

@@ -9,6 +9,11 @@ import XCTest
 /// installed bundle: `PeerTrustTests` covers the trust decision itself, and
 /// any preview appearing in MANUAL-TESTING.md's Quick Look steps proves the
 /// connection was accepted.
+///
+/// The refusal is coarse on purpose: it holds for any reason `isTrustedPeer`
+/// says no (under XCTest `Bundle.main` is likely not inside an `.app`, so the
+/// own-root guard may be what refuses), so this pins the delegate consulting
+/// the check, while `PeerTrustTests` pins each reason.
 final class ServiceDelegateTests: XCTestCase {
 
     // breaks-if: ServiceDelegate stops consulting PeerTrust.isTrustedPeer before exporting RenderService.

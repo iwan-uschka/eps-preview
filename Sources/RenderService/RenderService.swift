@@ -109,8 +109,11 @@ final class RenderService: NSObject, RenderProtocol {
     ///
     /// Not `private`: neither of its failures (an uncreatable staging file, an
     /// input that grew past the cap after `fstat`) can be provoked through
-    /// `renderEPSToPDF`, so `RenderServiceTests` calls this directly.
-    static func stage(_ input: FileHandle, atPath path: String) throws {
+    /// `renderEPSToPDF`, so `RenderServiceTests` calls this directly. `limit`
+    /// is a parameter only so those tests can use a small one instead of
+    /// writing `maxInputBytes` to disk.
+    static func stage(_ input: FileHandle, atPath path: String,
+                      limit: Int = RenderLimits.maxInputBytes) throws {
         guard FileManager.default.createFile(atPath: path, contents: nil,
                                              attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown)
@@ -121,7 +124,7 @@ final class RenderService: NSObject, RenderProtocol {
         var copied = 0
         while let chunk = try input.read(upToCount: stagingChunkBytes), !chunk.isEmpty {
             copied += chunk.count
-            guard copied <= RenderLimits.maxInputBytes else {
+            guard copied <= limit else {
                 throw RenderFailure.inputTooLarge
             }
             try output.write(contentsOf: chunk)

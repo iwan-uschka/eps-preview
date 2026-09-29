@@ -10,7 +10,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/eps-signature-checks-test.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PASSED=0
 FAILED=0
@@ -82,6 +84,16 @@ if [ "$RC" -eq 1 ] && [[ "$OUT" == "error: no bundle at $MISSING" ]]; then
   pass "assert_sandbox_state refuses a missing bundle instead of reading it as absent"
 else
   fail "assert_sandbox_state refuses a missing bundle" "rc=$RC out=$OUT"
+fi
+
+# An existing file with no signature has no entitlements either, so it reads as
+# `absent` on purpose: the `|| true` / `|| state="absent"` fallbacks are intended.
+# breaks-if: a failing `codesign -d` on an existing unsigned file stops reading as `absent` (fallback removed or turned into an error)
+check assert_sandbox_state absent "$UNSIGNED"
+if [ "$RC" -eq 0 ] && [ -z "$OUT" ]; then
+  pass "assert_sandbox_state absent passes on an existing file with no signature"
+else
+  fail "assert_sandbox_state absent on an unsigned file" "rc=$RC out=$OUT"
 fi
 
 # breaks-if: the final `[ "$state" = "$want" ]` comparison stops failing (e.g. loses its exit 1)

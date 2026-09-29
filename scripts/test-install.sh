@@ -23,7 +23,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # trailing slash on $TMPDIR would otherwise leave `//` in every path here and
 # none in the ones the scripts compute, and the codesign stub matches exactly.
 WORK="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/eps-install-test.XXXXXX")" && pwd)"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PASSED=0
 FAILED=0
@@ -241,6 +243,7 @@ else
 fi
 
 # breaks-if: extension_gone treats any non-empty output, the "(no matches)" placeholder included, as still registered
+make_app "$DEST" installed
 run uninstall.sh PLUGINKIT_MODE=placeholder
 if [ "$RC" -eq 0 ] && [[ "$OUT" == *"✓ EPS Preview uninstalled."* ]]; then
   pass "uninstall.sh reads pluginkit's '(no matches)' placeholder as deregistered"

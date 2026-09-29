@@ -221,8 +221,12 @@ negative counterpart to the same check accepting a peer inside that root.
 the same reason) asserts an untrusted connection is refused with nothing
 exported on it, and `RenderServiceTests` (`RenderService.swift`) pins the
 refusals made before any Ghostscript runs: a non-regular, empty or oversized
-input, and a staging copy that cannot be created or outgrows the limit. The
-plain-bash suites (no dependencies) cover the shell side:
+input, and a staging copy that cannot be created or outgrows the limit.
+`GhostscriptVersionProbeTests` drives `GhostscriptLocator`'s `gs --version`
+probe against fake `gs` scripts (non-zero exit, no output, unlaunchable,
+below the floor), and `GhostscriptLocatorTests` also pins the bundled copy
+being found from a bundle nested in the `.app` and ignored outside any
+`.app`. The plain-bash suites (no dependencies) cover the shell side:
 `scripts/test-ghostscript-check.sh` pins the installer's Ghostscript vetting
 against the service's using fake `gs` binaries,
 `scripts/test-ghostscript-manifest.sh` pins the bundled-library closure gate
@@ -254,7 +258,8 @@ destructive on a missing build, an extension without its embedded
 `RenderService.xpc` or an invalid build-tree signature, dropping a staged copy
 whose signature is invalid, and both `install.sh` and `uninstall.sh` treating a
 failing `pluginkit` as not (de)registered — run from sed-redirected copies
-against a fake `/Applications` and stubbed system tools; and
+against a fake `/Applications` and stubbed system tools (BSD `sed`, so macOS
+only); and
 `scripts/test-signature-checks.sh` pins `scripts/lib/signature-checks.sh`'s
 sandbox-entitlement and hardened-runtime assertions against binaries re-signed
 ad hoc by the real `codesign` (macOS only).

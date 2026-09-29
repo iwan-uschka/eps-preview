@@ -89,13 +89,14 @@ final class RenderServiceTests: XCTestCase {
     }
 
     func testStagingAcceptsAnInputExactlyAtTheLimit() throws {
-        let input = try inputFile(size: RenderLimits.maxInputBytes)
+        let limit = 4096
+        let input = try inputFile(size: limit)
         let staged = workDir.appendingPathComponent("staged.eps")
 
-        try RenderService.stage(input, atPath: staged.path)
+        try RenderService.stage(input, atPath: staged.path, limit: limit)
 
         let attributes = try FileManager.default.attributesOfItem(atPath: staged.path)
-        XCTAssertEqual((attributes[.size] as? NSNumber)?.intValue, RenderLimits.maxInputBytes)
+        XCTAssertEqual((attributes[.size] as? NSNumber)?.intValue, limit)
     }
 
     // breaks-if: stage ignores a false return from FileManager.createFile and carries on to open the path.
@@ -112,10 +113,11 @@ final class RenderServiceTests: XCTestCase {
     func testStagingStopsAnInputThatGrewPastTheLimit() throws {
         // Called directly, as for a file that grew after renderEPSToPDF's
         // fstat: the copy itself must still refuse to go past the limit.
-        let input = try inputFile(size: RenderLimits.maxInputBytes + 1)
+        let limit = 4096
+        let input = try inputFile(size: limit + 1)
         let staged = workDir.appendingPathComponent("staged.eps")
 
-        XCTAssertThrowsError(try RenderService.stage(input, atPath: staged.path)) { error in
+        XCTAssertThrowsError(try RenderService.stage(input, atPath: staged.path, limit: limit)) { error in
             XCTAssertEqual(error as? RenderFailure, .inputTooLarge)
         }
     }
